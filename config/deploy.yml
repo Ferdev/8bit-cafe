@@ -32,6 +32,8 @@ proxy:
   app_port: 80
   ssl: true
   forward_headers: true
+  buffering:
+    responses: false
   healthcheck:
     path: /up
     interval: 3
