@@ -5,6 +5,7 @@ COPY gleam.toml manifest.toml ./
 RUN gleam deps download
 
 COPY src ./src
+COPY assets ./assets
 COPY index.html style.css ./
 RUN gleam run -m lustre/dev build chipcafe \
   && cp index.html dist/index.html \
