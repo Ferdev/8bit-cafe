@@ -84,6 +84,7 @@ fn rooms() -> List(Room) {
       station_url: "https://www.slayradio.org/",
       description: "COMMODORE 64 & AMIGA REMIXES, LIVE FROM SWEDEN",
       sources: [
+        #("/streams/slay", "audio/mpeg"),
         #("http://relay4.slayradio.org:8000/", "audio/mpeg"),
       ],
       art: "castle.gif",
@@ -96,6 +97,7 @@ fn rooms() -> List(Room) {
       station_url: "https://www.kaaosradio.fi/",
       description: "FINNISH CHIPTUNES, BITPOP & TRACKER MUSIC",
       sources: [
+        #("/streams/kaaos", "audio/mpeg"),
         #("http://stream.kaaosradio.fi:8000/chip", "audio/mpeg"),
       ],
       art: "gameboy.gif",
@@ -108,6 +110,8 @@ fn rooms() -> List(Room) {
       station_url: "https://kohina.com/",
       description: "OLD SCHOOL 8-BIT GAME MUSIC, 24/7 FROM FINLAND",
       sources: [
+        #("/streams/kohina", "audio/ogg"),
+        #("/streams/kohina-aac", "audio/aac"),
         #("http://kohina.duckdns.org:8000/stream.ogg", "audio/ogg"),
         #("http://kohina.duckdns.org:8000/stream.aac", "audio/aac"),
       ],
