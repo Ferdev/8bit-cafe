@@ -20,6 +20,7 @@ jobs:
         uses: erlef/setup-beam@0f75c29430f34bb5af4cce5e3b7f6a8860fca236 # v1
         with:
           otp-version: "27"
+          rebar3-version: "3.24.0"
 
       - name: Install Gleam
         run: |

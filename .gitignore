@@ -10,3 +10,4 @@ dist/
 #Added automatically by Lustre Dev Tools
 /.lustre
 /dist
+config/deploy.local.yml
