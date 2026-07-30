@@ -1,0 +1,12 @@
+*.beam
+*.ez
+/build
+/priv
+.erlang.cookie
+dist/
+.venv/
+.kamal/secrets*
+
+#Added automatically by Lustre Dev Tools
+/.lustre
+/dist

@@ -1,0 +1,417 @@
+/* ----------------------------------------------------------- 8bit.cafe */
+/* 8-bit / 16-bit CRT aesthetic                                           */
+
+:root {
+  --bg: #0a0614;
+  --panel: #14102a;
+  --ink: #e8e4ff;
+  --dim: #8a84b0;
+  --green: #3affa0;
+  --magenta: #ff3ad4;
+  --cyan: #3ae8ff;
+  --amber: #ffb03a;
+  --red: #ff3a3a;
+  --purple: #b46bff;
+  --gb: #9bbc0f;
+  --font-head: "Press Start 2P", monospace;
+  --font-body: "VT323", monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 22px;
+  overflow-x: hidden;
+}
+
+/* CRT scanlines + vignette over everything */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9000;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.28) 3px,
+      rgba(0, 0, 0, 0.28) 4px
+    );
+  animation: crt-flicker 4s infinite;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9001;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 55%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+@keyframes crt-flicker {
+  0%, 100% { opacity: 1; }
+  96% { opacity: 1; }
+  97% { opacity: 0.86; }
+  98% { opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.blink {
+  animation: blink 1.1s steps(1) infinite;
+}
+
+img {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* --------------------------------------------------------------- common */
+
+.screen {
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+.logo {
+  font-family: var(--font-head);
+  font-size: clamp(24px, 5vw, 48px);
+  letter-spacing: 2px;
+  color: var(--green);
+  text-shadow:
+    3px 3px 0 var(--magenta),
+    6px 6px 0 rgba(0, 0, 0, 0.6);
+}
+
+.tagline {
+  color: var(--dim);
+  font-size: 24px;
+  margin-top: 18px;
+  letter-spacing: 1px;
+}
+
+.pixel-btn {
+  font-family: var(--font-head);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 4px solid var(--ink);
+  padding: 14px 22px;
+  cursor: pointer;
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.7);
+  transition: transform 0.05s steps(2), box-shadow 0.05s steps(2);
+}
+
+.pixel-btn:hover {
+  background: var(--green);
+  color: #06120c;
+  border-color: var(--green);
+}
+
+.pixel-btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.7);
+}
+
+/* ----------------------------------------------------------------- boot */
+
+.boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-align: center;
+}
+
+.boot-box {
+  padding: 40px;
+}
+
+.insert-coin {
+  font-family: var(--font-head);
+  font-size: clamp(14px, 2.5vw, 22px);
+  color: var(--amber);
+  margin-top: 48px;
+}
+
+.credits {
+  color: var(--dim);
+  margin-top: 32px;
+  font-size: 20px;
+}
+
+/* ---------------------------------------------------------------- lobby */
+
+.lobby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+}
+
+.lobby-header {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 380px));
+  gap: 32px;
+  justify-content: center;
+  width: 100%;
+  max-width: 1400px;
+}
+
+.room-card {
+  position: relative;
+  background: var(--panel);
+  border: 4px solid var(--ink);
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.7);
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  transition: transform 0.06s steps(2), box-shadow 0.06s steps(2);
+}
+
+.room-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 11px 11px 0 rgba(0, 0, 0, 0.7);
+}
+
+.room-card:active {
+  transform: translate(4px, 4px);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.7);
+}
+
+.accent-space.room-card:hover { border-color: var(--magenta); }
+.accent-city.room-card:hover { border-color: var(--cyan); }
+.accent-ocean.room-card:hover { border-color: var(--amber); }
+.accent-forest.room-card:hover { border-color: var(--green); }
+.accent-castle.room-card:hover { border-color: var(--purple); }
+.accent-gb.room-card:hover { border-color: var(--gb); }
+
+.room-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-bottom: 4px solid var(--ink);
+}
+
+.room-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+}
+
+.room-name {
+  font-family: var(--font-head);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.room-station {
+  color: var(--dim);
+  font-size: 20px;
+}
+
+.room-press {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-family: var(--font-head);
+  font-size: 10px;
+  color: var(--green);
+  background: rgba(6, 4, 14, 0.85);
+  border: 3px solid var(--green);
+  padding: 8px 10px;
+}
+
+.lobby-footer {
+  margin-top: 56px;
+  color: var(--dim);
+  font-size: 18px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer-links {
+  color: var(--ink);
+}
+
+.footer-links a {
+  color: var(--green);
+  text-decoration: none;
+  border-bottom: 2px solid var(--green);
+  padding-bottom: 1px;
+}
+
+.footer-links a:hover {
+  color: var(--bg);
+  background: var(--green);
+}
+
+/* ----------------------------------------------------------------- room */
+
+.room {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.room-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.02);
+}
+
+.room-overlay {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 24px;
+}
+
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.live-badge {
+  font-family: var(--font-head);
+  font-size: 12px;
+  color: var(--dim);
+  border: 3px solid var(--dim);
+  background: rgba(6, 4, 14, 0.85);
+  padding: 10px 14px;
+}
+
+.live-badge.on {
+  color: var(--red);
+  border-color: var(--red);
+  animation: blink 1.4s steps(1) infinite;
+}
+
+.room-panel {
+  align-self: center;
+  text-align: center;
+  background: rgba(6, 4, 14, 0.88);
+  border: 4px solid var(--ink);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.7);
+  padding: 28px 40px;
+  max-width: 640px;
+}
+
+.accent-space .room-panel { border-color: var(--magenta); }
+.accent-city .room-panel { border-color: var(--cyan); }
+.accent-ocean .room-panel { border-color: var(--amber); }
+.accent-forest .room-panel { border-color: var(--green); }
+.accent-castle .room-panel { border-color: var(--purple); }
+.accent-gb .room-panel { border-color: var(--gb); }
+
+.room-title {
+  font-family: var(--font-head);
+  font-size: clamp(18px, 3vw, 28px);
+  margin-bottom: 14px;
+}
+
+.accent-space .room-title { color: var(--magenta); }
+.accent-city .room-title { color: var(--cyan); }
+.accent-ocean .room-title { color: var(--amber); }
+.accent-forest .room-title { color: var(--green); }
+.accent-castle .room-title { color: var(--purple); }
+.accent-gb .room-title { color: var(--gb); }
+
+.room-station-big {
+  color: var(--ink);
+  font-size: 26px;
+}
+
+.station-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 2px dashed var(--dim);
+}
+
+.station-link:hover {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+.station-link::after {
+  content: " ↗";
+  font-size: 18px;
+}
+
+.room-desc {
+  color: var(--dim);
+  font-size: 20px;
+  margin: 10px 0 24px;
+}
+
+.stream-status {
+  font-family: var(--font-head);
+  font-size: 11px;
+  color: var(--dim);
+  margin: 0 0 20px;
+  letter-spacing: 1px;
+}
+
+.stream-status.ok {
+  color: var(--green);
+}
+
+.stream-status.error {
+  color: var(--red);
+}
+
+.play-btn {
+  min-width: 200px;
+}
+
+.hidden-player {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .room-panel {
+    padding: 20px;
+    width: calc(100vw - 48px);
+  }
+}

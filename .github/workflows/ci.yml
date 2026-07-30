@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [trunk]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Build, test, and bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Erlang
+        uses: erlef/setup-beam@0f75c29430f34bb5af4cce5e3b7f6a8860fca236 # v1
+        with:
+          otp-version: "27"
+
+      - name: Install Gleam
+        run: |
+          curl -fsSL https://github.com/gleam-lang/gleam/releases/download/v1.17.0/gleam-v1.17.0-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin
+          gleam --version
+
+      - name: Download dependencies
+        run: gleam deps download
+
+      - name: Check formatting
+        run: gleam format --check src test
+
+      - name: Build
+        run: gleam build
+
+      - name: Test
+        run: gleam test
+
+      - name: Build production bundle
+        run: tools/build.sh
+
+      - name: Verify bundle contents
+        run: |
+          test -f dist/index.html
+          test -f dist/chipcafe.js
+          test -f dist/style.css
+          ls dist/*.gif
