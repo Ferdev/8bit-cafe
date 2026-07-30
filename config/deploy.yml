@@ -26,6 +26,9 @@ builder:
   arch: amd64
 
 proxy:
+  hosts:
+    - 8bit.cafe
+    - www.8bit.cafe
   app_port: 80
   ssl: true
   forward_headers: true
