@@ -22,13 +22,21 @@ if (( before_kib < minimum_kib )); then
   docker container prune -f --filter "until=${pressure_prune_until_hours}h"
   docker image prune -f --filter "until=${pressure_prune_until_hours}h"
   docker builder prune -f --filter "until=${pressure_prune_until_hours}h"
+
+  # Tagged images that are no longer referenced by a container are safe to
+  # recreate from the registry. Keep images used by running or retained Kamal
+  # containers so the current release and its local rollback stay available.
+  after_conservative_prune_kib="$(available_kib)"
+  if (( after_conservative_prune_kib < minimum_kib )); then
+    docker image prune -a -f --filter "until=${pressure_prune_until_hours}h"
+  fi
 fi
 
 after_kib="$(available_kib)"
 echo "Docker storage after preflight: $((after_kib / 1024 / 1024)) GiB free"
 (( after_kib >= minimum_kib )) || {
   echo "Insufficient Docker storage for a reversible deploy" >&2
-  echo "No volumes, running containers, or tagged images were removed." >&2
+  echo "No volumes, containers, or images referenced by containers were removed." >&2
   docker system df >&2 || true
   exit 1
 }
