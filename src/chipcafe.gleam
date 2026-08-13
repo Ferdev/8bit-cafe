@@ -1,5 +1,6 @@
 import gleam/dynamic/decode
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import lustre
 import lustre/attribute
 import lustre/element.{type Element}
@@ -34,8 +35,29 @@ pub type StreamStatus {
 }
 
 pub type Model {
-  Model(screen: Screen, playing: Bool, status: StreamStatus)
+  Model(
+    screen: Screen,
+    playing: Bool,
+    status: StreamStatus,
+    saved_room: Option(Room),
+  )
 }
+
+@external(erlang, "chipcafe_ffi", "load_favorite")
+@external(javascript, "./chipcafe_ffi.mjs", "loadFavorite")
+fn load_favorite() -> String
+
+@external(erlang, "chipcafe_ffi", "save_favorite")
+@external(javascript, "./chipcafe_ffi.mjs", "saveFavorite")
+fn save_favorite(room_id: String) -> Nil
+
+@external(erlang, "chipcafe_ffi", "clear_favorite")
+@external(javascript, "./chipcafe_ffi.mjs", "clearFavorite")
+fn clear_favorite() -> Nil
+
+@external(erlang, "chipcafe_ffi", "track_event")
+@external(javascript, "./chipcafe_ffi.mjs", "trackEvent")
+fn track_event(name: String, room_id: String) -> Nil
 
 fn rooms() -> List(Room) {
   [
@@ -121,17 +143,31 @@ fn rooms() -> List(Room) {
   ]
 }
 
+pub fn find_room(room_id: String) -> Option(Room) {
+  case list.find(rooms(), fn(room) { room.id == room_id }) {
+    Ok(room) -> Some(room)
+    Error(_) -> None
+  }
+}
+
 fn init(_) -> Model {
-  Model(screen: Boot, playing: False, status: Tuning)
+  Model(
+    screen: Boot,
+    playing: False,
+    status: Tuning,
+    saved_room: find_room(load_favorite()),
+  )
 }
 
 // ------------------------------------------------------------------ update
 
 pub type Msg {
   InsertCoin
+  ResumeRoom(Room)
   SelectRoom(Room)
   LeaveRoom
   TogglePlay
+  ToggleSave(Room)
   StreamPlaying
   StreamBuffering
   StreamError
@@ -140,10 +176,29 @@ pub type Msg {
 fn update(model: Model, msg: Msg) -> Model {
   case msg {
     InsertCoin -> Model(..model, screen: Lobby)
-    SelectRoom(room) ->
-      Model(screen: InRoom(room), playing: True, status: Tuning)
-    LeaveRoom -> Model(screen: Lobby, playing: False, status: Tuning)
+    ResumeRoom(room) -> {
+      track_event("return_listener_resume", room.id)
+      Model(..model, screen: InRoom(room), playing: True, status: Tuning)
+    }
+    SelectRoom(room) -> {
+      track_event("station_started", room.id)
+      Model(..model, screen: InRoom(room), playing: True, status: Tuning)
+    }
+    LeaveRoom -> Model(..model, screen: Lobby, playing: False, status: Tuning)
     TogglePlay -> Model(..model, playing: !model.playing, status: Tuning)
+    ToggleSave(room) ->
+      case is_saved(model.saved_room, room) {
+        True -> {
+          clear_favorite()
+          track_event("station_unsaved", room.id)
+          Model(..model, saved_room: None)
+        }
+        False -> {
+          save_favorite(room.id)
+          track_event("station_saved", room.id)
+          Model(..model, saved_room: Some(room))
+        }
+      }
     StreamPlaying -> Model(..model, status: Playing)
     StreamBuffering -> Model(..model, status: Tuning)
     StreamError -> Model(..model, status: StreamFailed)
@@ -154,30 +209,55 @@ fn update(model: Model, msg: Msg) -> Model {
 
 fn view(model: Model) -> Element(Msg) {
   case model.screen {
-    Boot -> view_boot()
-    Lobby -> view_lobby()
-    InRoom(room) -> view_room(room, model.playing, model.status)
+    Boot -> view_boot(model.saved_room)
+    Lobby -> view_lobby(model.saved_room)
+    InRoom(room) ->
+      view_room(room, model.playing, model.status, model.saved_room)
   }
 }
 
-fn view_boot() -> Element(Msg) {
-  html.div([attribute.class("screen boot"), event.on_click(InsertCoin)], [
+fn view_boot(saved_room: Option(Room)) -> Element(Msg) {
+  html.div([attribute.class("screen boot")], [
     html.div([attribute.class("boot-box")], [
       html.h1([attribute.class("logo glitch")], [element.text("8BIT.CAFE")]),
       html.p([attribute.class("tagline")], [
         element.text("CHIPTUNE RADIO FOR STUDY, WORK & BOSS FIGHTS"),
       ]),
-      html.p([attribute.class("blink insert-coin")], [
-        element.text("- INSERT COIN -"),
-      ]),
+      case saved_room {
+        Some(room) ->
+          html.div([attribute.class("return-player")], [
+            html.p([attribute.class("return-label")], [
+              element.text("SAVE DATA FOUND"),
+            ]),
+            html.button(
+              [
+                attribute.class("pixel-btn resume-btn"),
+                event.on_click(ResumeRoom(room)),
+              ],
+              [element.text("▶ CONTINUE " <> room.name)],
+            ),
+            html.button(
+              [attribute.class("text-btn"), event.on_click(InsertCoin)],
+              [element.text("CHOOSE ANOTHER STAGE")],
+            ),
+          ])
+        None ->
+          html.button(
+            [
+              attribute.class("insert-coin blink text-btn"),
+              event.on_click(InsertCoin),
+            ],
+            [element.text("- INSERT COIN -")],
+          )
+      },
       html.p([attribute.class("credits")], [
-        element.text("6 STATIONS · 0 COINS REQUIRED · PRESS ANYWHERE"),
+        element.text("6 STATIONS · 0 COINS REQUIRED"),
       ]),
     ]),
   ])
 }
 
-fn view_lobby() -> Element(Msg) {
+fn view_lobby(saved_room: Option(Room)) -> Element(Msg) {
   html.div([attribute.class("screen lobby")], [
     html.header([attribute.class("lobby-header")], [
       html.h1([attribute.class("logo")], [element.text("8BIT.CAFE")]),
@@ -185,7 +265,29 @@ fn view_lobby() -> Element(Msg) {
         element.text("SELECT YOUR STAGE"),
       ]),
     ]),
-    html.main([attribute.class("room-grid")], list.map(rooms(), view_room_card)),
+    case saved_room {
+      Some(room) ->
+        html.aside([attribute.class("continue-strip")], [
+          html.div([], [
+            html.span([attribute.class("continue-eyebrow")], [
+              element.text("YOUR SAVED STAGE"),
+            ]),
+            html.strong([], [element.text(room.name <> " · " <> room.station)]),
+          ]),
+          html.button(
+            [attribute.class("pixel-btn"), event.on_click(ResumeRoom(room))],
+            [element.text("▶ RESUME")],
+          ),
+        ])
+      None ->
+        html.p([attribute.class("save-hint")], [
+          element.text("TIP: SAVE A STAGE TO RESUME IT ON YOUR NEXT VISIT"),
+        ])
+    },
+    html.main(
+      [attribute.class("room-grid")],
+      list.map(rooms(), fn(room) { view_room_card(room, saved_room) }),
+    ),
     html.footer([attribute.class("lobby-footer")], [
       html.p([attribute.class("footer-links")], [
         element.text("MADE BY FER · "),
@@ -214,7 +316,7 @@ fn view_lobby() -> Element(Msg) {
   ])
 }
 
-fn view_room_card(room: Room) -> Element(Msg) {
+fn view_room_card(room: Room, saved_room: Option(Room)) -> Element(Msg) {
   html.button(
     [
       attribute.class("room-card " <> room.accent),
@@ -235,11 +337,28 @@ fn view_room_card(room: Room) -> Element(Msg) {
       html.span([attribute.class("room-press blink")], [
         element.text("▶ PRESS START"),
       ]),
+      case is_saved(saved_room, room) {
+        True ->
+          html.span([attribute.class("saved-badge")], [element.text("★ SAVED")])
+        False -> element.none()
+      },
     ],
   )
 }
 
-fn view_room(room: Room, playing: Bool, status: StreamStatus) -> Element(Msg) {
+pub fn is_saved(saved_room: Option(Room), room: Room) -> Bool {
+  case saved_room {
+    Some(saved) -> saved.id == room.id
+    None -> False
+  }
+}
+
+fn view_room(
+  room: Room,
+  playing: Bool,
+  status: StreamStatus,
+  saved_room: Option(Room),
+) -> Element(Msg) {
   html.div([attribute.class("screen room " <> room.accent)], [
     html.img([
       attribute.src(room.art),
@@ -279,15 +398,39 @@ fn view_room(room: Room, playing: Bool, status: StreamStatus) -> Element(Msg) {
           element.text(room.description),
         ]),
         view_status(playing, status),
-        html.button(
-          [attribute.class("pixel-btn play-btn"), event.on_click(TogglePlay)],
-          [
-            element.text(case playing {
-              True -> "❚❚ PAUSE"
-              False -> "▶ PLAY"
-            }),
-          ],
-        ),
+        html.div([attribute.class("player-actions")], [
+          html.button(
+            [attribute.class("pixel-btn play-btn"), event.on_click(TogglePlay)],
+            [
+              element.text(case playing {
+                True -> "❚❚ PAUSE"
+                False -> "▶ PLAY"
+              }),
+            ],
+          ),
+          html.button(
+            [
+              attribute.class(case is_saved(saved_room, room) {
+                True -> "pixel-btn save-btn saved"
+                False -> "pixel-btn save-btn"
+              }),
+              attribute.aria_pressed(case is_saved(saved_room, room) {
+                True -> "true"
+                False -> "false"
+              }),
+              event.on_click(ToggleSave(room)),
+            ],
+            [
+              element.text(case is_saved(saved_room, room) {
+                True -> "★ STAGE SAVED"
+                False -> "☆ SAVE STAGE"
+              }),
+            ],
+          ),
+        ]),
+        html.p([attribute.class("save-note")], [
+          element.text("SAVED ONLY IN THIS BROWSER · NO SIGN-UP"),
+        ]),
       ]),
     ]),
     case playing {
