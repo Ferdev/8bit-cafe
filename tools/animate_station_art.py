@@ -70,10 +70,6 @@ def keygen_vault() -> None:
             width = 5 + ((row * 7 + frame // 4) % 16)
             draw.line((72, y, 72 + width, y), fill=(61, 121, 190, 185))
 
-        # The disk drive activity LED blinks only while rows advance.
-        if frame % 6 < 2:
-            draw.point((166, 68), fill=(242, 61, 183, 230))
-
         frames.append(composite(base, layer))
 
     save(frames, "keygen-vault")
@@ -89,7 +85,7 @@ def sid_studio() -> None:
 
         # A short SID waveform travels across the computer's CRT.
         points = []
-        for x in range(76, 108):
+        for x in range(72, 102):
             y = 54 + int(3 * math.sin((x + frame * 2) * 0.55))
             points.append((x, y))
         draw.line(points, fill=(112, 158, 77, 210))
@@ -110,15 +106,17 @@ def rpg_overworld() -> None:
     base = Image.open(SOURCE / "rpg-overworld.png").convert("RGB")
     frames = []
     stars = ((31, 12), (63, 15), (91, 9), (119, 17), (151, 12))
-    castle_windows = ((128, 50), (132, 49), (137, 50))
+    castle_windows = ((137, 58), (144, 61))
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Narrow moonlit ripples drift along the river.
-        for index, y in enumerate((66, 69, 72, 75)):
-            x = 45 + ((frame * 3 + index * 19) % 66)
-            draw.line((x, y, min(114, x + 5 + index), y), fill=(82, 91, 170, 155))
+        # Moonlit ripples stay inside the distant lake behind the road.
+        lake_ripples = ((18, 76, 7), (48, 78, 9), (82, 80, 11))
+        for index, (origin_x, y, width) in enumerate(lake_ripples):
+            shift = (frame + index * 5) % FRAMES
+            x = origin_x + shift
+            draw.line((x, y, x + width, y), fill=(82, 91, 170, 155))
 
         # Stars twinkle and castle windows flicker like the original castle room.
         for index, (x, y) in enumerate(stars):
@@ -141,19 +139,10 @@ def radiosega_circuit() -> None:
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Moonlight breaks naturally across the water in short moving ripples.
-        for index, y in enumerate(range(52, 64, 3)):
-            shift = int(2 * math.sin(frame * 0.55 + index))
-            half_width = 2 + index
-            draw.line(
-                (21 - half_width + shift, y, 21 + half_width + shift, y),
-                fill=(232, 216, 151, 170),
-            )
-
-        # A tiny pair of headlights follows the road toward the foreground.
+        # A tiny pair of headlights follows the visible road toward the foreground.
         progress = frame / (FRAMES - 1)
-        car_x = int(169 - 94 * progress)
-        car_y = int(58 + 39 * progress)
+        car_x = int(150 - 76 * progress)
+        car_y = int(61 + 37 * progress)
         separation = 1 + int(progress * 3)
         draw.point((car_x - separation, car_y), fill=(255, 204, 84, 230))
         draw.point((car_x + separation, car_y), fill=(255, 204, 84, 230))
@@ -172,12 +161,12 @@ def gtt_arena() -> None:
     base = Image.open(SOURCE / "gtt-arena.png").convert("RGB")
     frames = []
     cabinet_screens = (
-        (8, 43, 20, 52),
-        (25, 43, 37, 52),
-        (43, 43, 55, 52),
-        (138, 43, 150, 52),
-        (155, 43, 167, 52),
-        (172, 43, 184, 52),
+        (4, 50, 16, 58),
+        (23, 50, 35, 58),
+        (43, 50, 55, 58),
+        (137, 50, 149, 58),
+        (156, 50, 168, 58),
+        (174, 50, 186, 58),
     )
     board_x = (69, 80, 91, 102, 113)
     board_y = (29, 39, 49, 59)
@@ -208,10 +197,10 @@ def ericade_demoparty() -> None:
     base = Image.open(SOURCE / "ericade-demoparty.png").convert("RGB")
     frames = []
     screens = (
-        (17, 56, 29, 66),
-        (62, 56, 74, 66),
-        (107, 56, 119, 66),
-        (152, 56, 164, 66),
+        (17, 55, 28, 64),
+        (63, 55, 74, 64),
+        (109, 55, 120, 64),
+        (155, 55, 167, 64),
     )
     drive_leds = ((38, 73), (83, 73), (128, 73), (173, 73))
     stars = ((67, 16), (78, 23), (103, 14), (126, 19))
