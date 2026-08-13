@@ -160,6 +160,42 @@ fn rooms() -> List(Room) {
       art: "rpg-overworld.gif",
       accent: "accent-forest",
     ),
+    Room(
+      id: "radiosega",
+      name: "SPEED CIRCUIT",
+      station: "RADIOSEGA",
+      station_url: "https://www.radiosega.net/",
+      description: "THE BEST SEGA MUSIC FROM EVERY GENERATION, LIVE 24/7",
+      sources: [
+        #("https://icecast.radiosega.net/rs-mpeg.mp3", "audio/mpeg"),
+      ],
+      art: "radiosega-circuit.gif",
+      accent: "accent-city",
+    ),
+    Room(
+      id: "gtt-radio",
+      name: "QUIZ ARENA",
+      station: "GAME THAT TUNE RADIO",
+      station_url: "https://gttradio.com/",
+      description: "24/7 VIDEO GAME MUSIC FROM MORE THAN 1,000 SOUNDTRACKS",
+      sources: [
+        #("https://icecast.gttradio.com/mp3_gtt_320k", "audio/mpeg"),
+      ],
+      art: "gtt-arena.gif",
+      accent: "accent-ocean",
+    ),
+    Room(
+      id: "ericade",
+      name: "DEMO HALL",
+      station: "ERICADE.RADIO",
+      station_url: "https://radio.ericade.net/",
+      description: "AMIGA, TRACKER, CHIPTUNE & DEMOSCENE MUSIC, LIVE 24/7",
+      sources: [
+        #("https://radio.ericade.net/sc/stream/1/", "audio/mpeg"),
+      ],
+      art: "ericade-demoparty.gif",
+      accent: "accent-space",
+    ),
   ]
 }
 
@@ -213,7 +249,7 @@ fn view_boot() -> Element(Msg) {
         element.text("- INSERT COIN -"),
       ]),
       html.p([attribute.class("credits")], [
-        element.text("9 STATIONS · 0 COINS REQUIRED · PRESS ANYWHERE"),
+        element.text("12 STATIONS · 0 COINS REQUIRED · PRESS ANYWHERE"),
       ]),
     ]),
   ])

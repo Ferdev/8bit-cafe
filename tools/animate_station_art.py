@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create looping GIFs for the three generated station backgrounds.
+"""Create looping GIFs for the generated station backgrounds.
 
 The original generated PNGs live in ``tools/art_sources``.  Animation is
 drawn in small, scene-specific regions so the artwork stays crisp and the GIF
@@ -153,8 +153,128 @@ def rpg_overworld() -> None:
     save(frames, "rpg-overworld")
 
 
+def radiosega_circuit() -> None:
+    base = Image.open(SOURCE / "radiosega-circuit.png").convert("RGB")
+    frames = []
+
+    for frame in range(FRAMES):
+        layer, draw = overlay(base)
+
+        # Light trails race along the circuit while the gateway pulses.
+        offset = frame * 11
+        for index in range(5):
+            x = (offset + index * 93) % 470 - 12
+            y = 194 - x // 12
+            if 0 <= y < 245:
+                draw.line(
+                    (x, y, x + 15, y - 2),
+                    fill=(40, 231, 255, 190),
+                    width=2,
+                )
+
+        pulse = int(55 + 50 * (1 + math.sin(frame * math.tau / FRAMES)) / 2)
+        draw.ellipse((302, 17, 341, 62), outline=(255, 194, 45, pulse), width=2)
+        draw.ellipse((306, 21, 337, 58), outline=(255, 93, 35, pulse), width=1)
+
+        # The distant skyline and pit-lane cabinets blink independently.
+        for index, (x, y) in enumerate(((76, 80), (91, 75), (102, 79), (118, 72))):
+            if (frame + index * 3) % 9 < 3:
+                draw.point((x, y), fill=(255, 215, 83, 230))
+        for index, x in enumerate((391, 402, 413, 424, 435)):
+            if (frame + index * 2) % 8 < 3:
+                draw.rectangle((x, 152, x + 2, 153), fill=(48, 230, 255, 220))
+
+        frames.append(composite(base, layer))
+
+    save(frames, "radiosega-circuit")
+
+
+def gtt_arena() -> None:
+    base = Image.open(SOURCE / "gtt-arena.png").convert("RGB")
+    frames = []
+
+    for frame in range(FRAMES):
+        layer, draw = overlay(base)
+
+        # The monitor wall and stage equalizer react in alternating colors.
+        colors = (
+            (53, 232, 255, 205),
+            (255, 60, 204, 205),
+            (255, 171, 52, 205),
+            (119, 255, 112, 205),
+        )
+        for index in range(13):
+            x = 159 + index * 10
+            height = 2 + int(
+                7
+                * (
+                    1
+                    + math.sin(frame * 0.9 + index * 1.4)
+                    + 0.25 * math.sin(frame * 1.7 - index)
+                )
+                / 2.25
+            )
+            height = max(2, min(10, height))
+            draw.rectangle(
+                (x, 181 - height, x + 3, 181),
+                fill=colors[index % len(colors)],
+            )
+
+        for index, (x, y) in enumerate(((172, 67), (198, 67), (224, 67), (250, 67), (276, 67))):
+            glow = 70 if (frame + index * 3) % 10 < 5 else 20
+            draw.rectangle((x, y, x + 14, y + 6), fill=(50, 230, 255, glow))
+
+        # Spotlights sweep softly without obscuring the room artwork.
+        sweep_x = 122 + (frame * 13) % 210
+        draw.polygon(
+            ((sweep_x, 13), (sweep_x + 8, 13), (sweep_x + 33, 147), (sweep_x - 12, 147)),
+            fill=(255, 65, 218, 18),
+        )
+
+        frames.append(composite(base, layer))
+
+    save(frames, "gtt-arena")
+
+
+def ericade_demoparty() -> None:
+    base = Image.open(SOURCE / "ericade-demoparty.png").convert("RGB")
+    frames = []
+
+    for frame in range(FRAMES):
+        layer, draw = overlay(base)
+
+        # Copper bars and plasma waves roll across the big projection screen.
+        for index in range(4):
+            y = 43 + index * 8 + int(3 * math.sin(frame * 0.7 + index))
+            color = (50, 235, 255, 100) if index % 2 else (247, 87, 255, 100)
+            points = []
+            for x in range(157, 291, 5):
+                wave_y = y + int(3 * math.sin(x * 0.11 + frame * 0.6))
+                points.append((x, wave_y))
+            draw.line(points, fill=color, width=1)
+
+        bar_y = 24 + (frame * 4) % 52
+        draw.rectangle((156, bar_y, 292, bar_y + 1), fill=(255, 155, 45, 80))
+
+        # CRTs and modem LEDs flicker asynchronously around the hall.
+        screens = ((46, 111), (93, 103), (130, 112), (311, 109), (356, 103), (400, 112))
+        for index, (x, y) in enumerate(screens):
+            if (frame + index * 3) % 11 < 5:
+                draw.rectangle((x, y, x + 5, y + 3), fill=(57, 255, 190, 90))
+        for index, (x, y) in enumerate(((69, 141), (117, 130), (328, 135), (384, 132))):
+            if (frame + index * 2) % 7 < 2:
+                draw.point((x, y), fill=(255, 189, 53, 240))
+
+        frames.append(composite(base, layer))
+
+    save(frames, "ericade-demoparty")
+
+
 if __name__ == "__main__":
     OUTPUT.mkdir(exist_ok=True)
     keygen_vault()
     sid_studio()
     rpg_overworld()
+    radiosega_circuit()
+    gtt_arena()
+    ericade_demoparty()
