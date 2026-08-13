@@ -130,7 +130,7 @@ fn rooms() -> List(Room) {
           "audio/mpeg",
         ),
       ],
-      art: "keygen-vault.png",
+      art: "keygen-vault.gif",
       accent: "accent-gb",
     ),
     Room(
@@ -145,7 +145,7 @@ fn rooms() -> List(Room) {
           "audio/mpeg",
         ),
       ],
-      art: "sid-studio.png",
+      art: "sid-studio.gif",
       accent: "accent-castle",
     ),
     Room(
@@ -157,7 +157,7 @@ fn rooms() -> List(Room) {
       sources: [
         #("https://listen.rpgamers.net/rpgn", "audio/mpeg"),
       ],
-      art: "rpg-overworld.png",
+      art: "rpg-overworld.gif",
       accent: "accent-forest",
     ),
   ]
