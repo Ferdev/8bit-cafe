@@ -56,24 +56,23 @@ def save(frames: list[Image.Image], name: str) -> None:
 def keygen_vault() -> None:
     base = Image.open(SOURCE / "keygen-vault.png").convert("RGB")
     frames = []
-    led_points = [(65, 63), (80, 67), (97, 59), (118, 76), (137, 63)]
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # A cyan scan line rolls down the terminal without moving the scene.
-        scan_y = 48 + (frame * 5) % 66
-        draw.line((39, scan_y, 145, scan_y), fill=(0, 255, 245, 150), width=1)
-        draw.line((39, scan_y + 1, 145, scan_y + 1), fill=(0, 110, 255, 60), width=1)
+        # The terminal raster scans down the actual CRT display.
+        scan_y = 34 + frame % 22
+        draw.line((68, scan_y, 107, scan_y), fill=(32, 194, 214, 160))
 
-        # The vault mechanism and ceiling strip breathe in alternating colors.
-        pulse = int(45 + 35 * (1 + math.sin(frame * math.tau / FRAMES)) / 2)
-        draw.ellipse((187, 40, 262, 116), outline=(36, 92, 255, pulse), width=2)
-        draw.line((218, 13, 265, 13), fill=(238, 38, 255, pulse + 50), width=2)
+        # Tracker rows advance inside the screen instead of over the room.
+        for row in range(6):
+            y = 35 + ((row * 4 - frame) % 21)
+            width = 5 + ((row * 7 + frame // 4) % 16)
+            draw.line((72, y, 72 + width, y), fill=(61, 121, 190, 185))
 
-        for index, (x, y) in enumerate(led_points):
-            if (frame + index * 3) % 8 < 3:
-                draw.rectangle((x, y, x + 2, y + 1), fill=(52, 255, 207, 220))
+        # The disk drive activity LED blinks only while rows advance.
+        if frame % 6 < 2:
+            draw.point((166, 68), fill=(242, 61, 183, 230))
 
         frames.append(composite(base, layer))
 
@@ -83,38 +82,24 @@ def keygen_vault() -> None:
 def sid_studio() -> None:
     base = Image.open(SOURCE / "sid-studio.png").convert("RGB")
     frames = []
+    stars = ((121, 14), (132, 19), (149, 13), (158, 27))
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Animate the CRT spectrum with deterministic tracker-style bars.
-        for index in range(18):
-            x = 187 + index * 4
-            height = 3 + int(
-                9
-                * (
-                    1
-                    + math.sin(frame * 0.8 + index * 1.7)
-                    + 0.35 * math.sin(frame * 1.4 - index)
-                )
-                / 2.35
-            )
-            height = max(2, min(13, height))
-            color = (36, 255, 235, 210) if index % 3 else (185, 80, 255, 210)
-            draw.rectangle((x, 124 - height, x + 1, 124), fill=color)
+        # A short SID waveform travels across the computer's CRT.
+        points = []
+        for x in range(76, 108):
+            y = 54 + int(3 * math.sin((x + frame * 2) * 0.55))
+            points.append((x, y))
+        draw.line(points, fill=(112, 158, 77, 210))
 
-        # Console LEDs chase slowly while the skyline twinkles outside.
-        for index in range(9):
-            if (frame + index * 2) % 10 < 4:
-                x = 82 + index * 8
-                draw.rectangle((x, 66, x + 2, 67), fill=(255, 143, 41, 210))
-        for index, (x, y) in enumerate(((364, 45), (388, 58), (412, 39), (430, 66))):
-            if (frame + index * 4) % 16 < 5:
-                draw.point((x, y), fill=(251, 111, 218, 240))
-
-        # A soft pulse makes the lava lamp feel alive.
-        lamp_alpha = int(30 + 30 * (1 + math.sin(frame * math.tau / FRAMES)) / 2)
-        draw.ellipse((35, 17, 52, 53), fill=(255, 72, 207, lamp_alpha))
+        # A synth status lamp and the stars change slowly and independently.
+        if frame % 8 < 3:
+            draw.point((126, 69), fill=(244, 171, 69, 230))
+        for index, (x, y) in enumerate(stars):
+            if (frame + index * 3) % 12 < 3:
+                draw.point((x, y), fill=(238, 223, 188, 220))
 
         frames.append(composite(base, layer))
 
@@ -124,29 +109,24 @@ def sid_studio() -> None:
 def rpg_overworld() -> None:
     base = Image.open(SOURCE / "rpg-overworld.png").convert("RGB")
     frames = []
-    stars = [(76, 31), (106, 18), (134, 27), (240, 19), (284, 30)]
+    stars = ((31, 12), (63, 15), (91, 9), (119, 17), (151, 12))
+    castle_windows = ((128, 50), (132, 49), (137, 50))
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Shift narrow highlights down both waterfalls.
-        for y in range(126 + frame % 4, 181, 6):
-            draw.line((18, y, 27, y + 3), fill=(98, 218, 255, 105), width=1)
-        for y in range(69 + frame % 4, 119, 6):
-            draw.line((333, y, 337, y + 3), fill=(80, 199, 255, 115), width=1)
+        # Narrow moonlit ripples drift along the river.
+        for index, y in enumerate((66, 69, 72, 75)):
+            x = 45 + ((frame * 3 + index * 19) % 66)
+            draw.line((x, y, min(114, x + 5 + index), y), fill=(82, 91, 170, 155))
 
-        pulse = int(35 + 40 * (1 + math.sin(frame * math.tau / FRAMES)) / 2)
-        draw.ellipse((331, 156, 386, 211), fill=(54, 106, 255, pulse))
-        draw.ellipse((422, 181, 443, 224), fill=(255, 101, 211, pulse // 2))
-
-        # Stars and path magic sparkle on alternating phases.
+        # Stars twinkle and castle windows flicker like the original castle room.
         for index, (x, y) in enumerate(stars):
-            if (frame + index * 3) % 8 < 3:
-                draw.line((x - 2, y, x + 2, y), fill=(220, 232, 255, 190))
-                draw.line((x, y - 2, x, y + 2), fill=(220, 232, 255, 190))
-        for index, (x, y) in enumerate(((205, 111), (231, 132), (256, 157), (292, 179))):
-            if (frame + index * 4) % 12 < 5:
-                draw.ellipse((x - 2, y - 2, x + 2, y + 2), fill=(255, 226, 94, 150))
+            if (frame + index * 3) % 10 < 3:
+                draw.point((x, y), fill=(204, 201, 226, 210))
+        for index, (x, y) in enumerate(castle_windows):
+            if (frame // 4 + index) % 4 != 0:
+                draw.point((x, y), fill=(246, 178, 57, 220))
 
         frames.append(composite(base, layer))
 
@@ -156,33 +136,32 @@ def rpg_overworld() -> None:
 def radiosega_circuit() -> None:
     base = Image.open(SOURCE / "radiosega-circuit.png").convert("RGB")
     frames = []
+    windows = ((57, 53), (62, 51), (67, 55), (73, 52), (78, 54))
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Light trails race along the circuit while the gateway pulses.
-        offset = frame * 11
-        for index in range(5):
-            x = (offset + index * 93) % 470 - 12
-            y = 194 - x // 12
-            if 0 <= y < 245:
-                draw.line(
-                    (x, y, x + 15, y - 2),
-                    fill=(40, 231, 255, 190),
-                    width=2,
-                )
+        # Moonlight breaks naturally across the water in short moving ripples.
+        for index, y in enumerate(range(52, 64, 3)):
+            shift = int(2 * math.sin(frame * 0.55 + index))
+            half_width = 2 + index
+            draw.line(
+                (21 - half_width + shift, y, 21 + half_width + shift, y),
+                fill=(232, 216, 151, 170),
+            )
 
-        pulse = int(55 + 50 * (1 + math.sin(frame * math.tau / FRAMES)) / 2)
-        draw.ellipse((302, 17, 341, 62), outline=(255, 194, 45, pulse), width=2)
-        draw.ellipse((306, 21, 337, 58), outline=(255, 93, 35, pulse), width=1)
+        # A tiny pair of headlights follows the road toward the foreground.
+        progress = frame / (FRAMES - 1)
+        car_x = int(169 - 94 * progress)
+        car_y = int(58 + 39 * progress)
+        separation = 1 + int(progress * 3)
+        draw.point((car_x - separation, car_y), fill=(255, 204, 84, 230))
+        draw.point((car_x + separation, car_y), fill=(255, 204, 84, 230))
 
-        # The distant skyline and pit-lane cabinets blink independently.
-        for index, (x, y) in enumerate(((76, 80), (91, 75), (102, 79), (118, 72))):
-            if (frame + index * 3) % 9 < 3:
-                draw.point((x, y), fill=(255, 215, 83, 230))
-        for index, x in enumerate((391, 402, 413, 424, 435)):
-            if (frame + index * 2) % 8 < 3:
-                draw.rectangle((x, 152, x + 2, 153), fill=(48, 230, 255, 220))
+        # Only a few distant windows flicker, as in the original city room.
+        for index, (x, y) in enumerate(windows):
+            if (frame // 4 + index) % 5 == 0:
+                draw.point((x, y), fill=(255, 196, 70, 220))
 
         frames.append(composite(base, layer))
 
@@ -192,44 +171,33 @@ def radiosega_circuit() -> None:
 def gtt_arena() -> None:
     base = Image.open(SOURCE / "gtt-arena.png").convert("RGB")
     frames = []
+    cabinet_screens = (
+        (8, 43, 20, 52),
+        (25, 43, 37, 52),
+        (43, 43, 55, 52),
+        (138, 43, 150, 52),
+        (155, 43, 167, 52),
+        (172, 43, 184, 52),
+    )
+    board_x = (69, 80, 91, 102, 113)
+    board_y = (29, 39, 49, 59)
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # The monitor wall and stage equalizer react in alternating colors.
-        colors = (
-            (53, 232, 255, 205),
-            (255, 60, 204, 205),
-            (255, 171, 52, 205),
-            (119, 255, 112, 205),
-        )
-        for index in range(13):
-            x = 159 + index * 10
-            height = 2 + int(
-                7
-                * (
-                    1
-                    + math.sin(frame * 0.9 + index * 1.4)
-                    + 0.25 * math.sin(frame * 1.7 - index)
-                )
-                / 2.25
-            )
-            height = max(2, min(10, height))
-            draw.rectangle(
-                (x, 181 - height, x + 3, 181),
-                fill=colors[index % len(colors)],
-            )
+        # The quiz board advances one highlighted answer every four frames.
+        selection = frame // 4
+        column = (selection * 2 + 1) % len(board_x)
+        row = selection % len(board_y)
+        x = board_x[column]
+        y = board_y[row]
+        draw.rectangle((x, y, x + 9, y + 8), outline=(242, 236, 202, 235))
 
-        for index, (x, y) in enumerate(((172, 67), (198, 67), (224, 67), (250, 67), (276, 67))):
-            glow = 70 if (frame + index * 3) % 10 < 5 else 20
-            draw.rectangle((x, y, x + 14, y + 6), fill=(50, 230, 255, glow))
-
-        # Spotlights sweep softly without obscuring the room artwork.
-        sweep_x = 122 + (frame * 13) % 210
-        draw.polygon(
-            ((sweep_x, 13), (sweep_x + 8, 13), (sweep_x + 33, 147), (sweep_x - 12, 147)),
-            fill=(255, 65, 218, 18),
-        )
+        # Cabinet attract modes scan down their own screens at different phases.
+        colors = ((63, 218, 255, 190), (255, 68, 186, 190), (255, 176, 57, 190))
+        for index, (left, top, right, bottom) in enumerate(cabinet_screens):
+            scan_y = top + (frame + index * 3) % (bottom - top)
+            draw.line((left, scan_y, right, scan_y), fill=colors[index % 3])
 
         frames.append(composite(base, layer))
 
@@ -239,31 +207,34 @@ def gtt_arena() -> None:
 def ericade_demoparty() -> None:
     base = Image.open(SOURCE / "ericade-demoparty.png").convert("RGB")
     frames = []
+    screens = (
+        (17, 56, 29, 66),
+        (62, 56, 74, 66),
+        (107, 56, 119, 66),
+        (152, 56, 164, 66),
+    )
+    drive_leds = ((38, 73), (83, 73), (128, 73), (173, 73))
+    stars = ((67, 16), (78, 23), (103, 14), (126, 19))
 
     for frame in range(FRAMES):
         layer, draw = overlay(base)
 
-        # Copper bars and plasma waves roll across the big projection screen.
-        for index in range(4):
-            y = 43 + index * 8 + int(3 * math.sin(frame * 0.7 + index))
-            color = (50, 235, 255, 100) if index % 2 else (247, 87, 255, 100)
-            points = []
-            for x in range(157, 291, 5):
-                wave_y = y + int(3 * math.sin(x * 0.11 + frame * 0.6))
-                points.append((x, wave_y))
-            draw.line(points, fill=color, width=1)
+        # Tracker rows scroll upward inside each CRT, clipped to the screen.
+        for index, (left, top, right, bottom) in enumerate(screens):
+            draw.rectangle((left, top, right, bottom), fill=(4, 18, 10, 235))
+            offset = (frame + index) % 3
+            for row in range(5):
+                y = top + 1 + ((row * 3 - offset) % 10)
+                width = 5 + ((row * 3 + index * 2) % 7)
+                draw.line((left + 1, y, min(right - 1, left + width), y), fill=(76, 181, 52, 230))
 
-        bar_y = 24 + (frame * 4) % 52
-        draw.rectangle((156, bar_y, 292, bar_y + 1), fill=(255, 155, 45, 80))
-
-        # CRTs and modem LEDs flicker asynchronously around the hall.
-        screens = ((46, 111), (93, 103), (130, 112), (311, 109), (356, 103), (400, 112))
-        for index, (x, y) in enumerate(screens):
-            if (frame + index * 3) % 11 < 5:
-                draw.rectangle((x, y, x + 5, y + 3), fill=(57, 255, 190, 90))
-        for index, (x, y) in enumerate(((69, 141), (117, 130), (328, 135), (384, 132))):
-            if (frame + index * 2) % 7 < 2:
-                draw.point((x, y), fill=(255, 189, 53, 240))
+        # Disk-drive activity lights blink independently while stars twinkle.
+        for index, (x, y) in enumerate(drive_leds):
+            if (frame + index * 3) % 9 < 3:
+                draw.point((x, y), fill=(132, 225, 75, 230))
+        for index, (x, y) in enumerate(stars):
+            if (frame + index * 4) % 12 < 3:
+                draw.point((x, y), fill=(220, 218, 238, 210))
 
         frames.append(composite(base, layer))
 
