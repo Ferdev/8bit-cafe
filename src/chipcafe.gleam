@@ -118,6 +118,48 @@ fn rooms() -> List(Room) {
       art: "starfield.gif",
       accent: "accent-space",
     ),
+    Room(
+      id: "keygen-fm",
+      name: "BYTE VAULT",
+      station: "KEYGEN-FM",
+      station_url: "https://keygen-fm.kodatek.app/",
+      description: "KEYGEN, CRACKTRO & TRACKER CHIPTUNES AROUND THE CLOCK",
+      sources: [
+        #(
+          "https://keygen-fm.kodatek.app/listen/keygen-fm/radio.mp3",
+          "audio/mpeg",
+        ),
+      ],
+      art: "gameboy.gif",
+      accent: "accent-gb",
+    ),
+    Room(
+      id: "sid-station",
+      name: "SID TEMPLE",
+      station: "THE SID STATION",
+      station_url: "https://c64radio.com/",
+      description: "COMMODORE 64 SID MUSIC & SCENE CLASSICS, LIVE 24/7",
+      sources: [
+        #(
+          "https://solid24.streamupsolutions.com/proxy/icfablwz/stream",
+          "audio/mpeg",
+        ),
+      ],
+      art: "castle.gif",
+      accent: "accent-castle",
+    ),
+    Room(
+      id: "rpgn",
+      name: "RPG REALM",
+      station: "RPGN RADIO",
+      station_url: "https://www.rpgamers.net/radio/",
+      description: "VIDEO GAME MUSIC FROM 8-BIT CLASSICS TO NEW RELEASES",
+      sources: [
+        #("https://listen.rpgamers.net/rpgn", "audio/mpeg"),
+      ],
+      art: "forest.gif",
+      accent: "accent-forest",
+    ),
   ]
 }
 
@@ -171,7 +213,7 @@ fn view_boot() -> Element(Msg) {
         element.text("- INSERT COIN -"),
       ]),
       html.p([attribute.class("credits")], [
-        element.text("6 STATIONS · 0 COINS REQUIRED · PRESS ANYWHERE"),
+        element.text("9 STATIONS · 0 COINS REQUIRED · PRESS ANYWHERE"),
       ]),
     ]),
   ])
