@@ -140,6 +140,84 @@ fn rooms() -> List(Room) {
       art: "starfield.gif",
       accent: "accent-space",
     ),
+    Room(
+      id: "keygen-fm",
+      name: "BYTE VAULT",
+      station: "KEYGEN-FM",
+      station_url: "https://keygen-fm.kodatek.app/",
+      description: "KEYGEN, CRACKTRO & TRACKER CHIPTUNES AROUND THE CLOCK",
+      sources: [
+        #(
+          "https://keygen-fm.kodatek.app/listen/keygen-fm/radio.mp3",
+          "audio/mpeg",
+        ),
+      ],
+      art: "keygen-vault.gif",
+      accent: "accent-gb",
+    ),
+    Room(
+      id: "sid-station",
+      name: "SID TEMPLE",
+      station: "THE SID STATION",
+      station_url: "https://c64radio.com/",
+      description: "COMMODORE 64 SID MUSIC & SCENE CLASSICS, LIVE 24/7",
+      sources: [
+        #(
+          "https://solid24.streamupsolutions.com/proxy/icfablwz/stream",
+          "audio/mpeg",
+        ),
+      ],
+      art: "sid-studio.gif",
+      accent: "accent-castle",
+    ),
+    Room(
+      id: "rpgn",
+      name: "RPG REALM",
+      station: "RPGN RADIO",
+      station_url: "https://www.rpgamers.net/radio/",
+      description: "VIDEO GAME MUSIC FROM 8-BIT CLASSICS TO NEW RELEASES",
+      sources: [
+        #("https://listen.rpgamers.net/rpgn", "audio/mpeg"),
+      ],
+      art: "rpg-overworld.gif",
+      accent: "accent-forest",
+    ),
+    Room(
+      id: "radiosega",
+      name: "SPEED CIRCUIT",
+      station: "RADIOSEGA",
+      station_url: "https://www.radiosega.net/",
+      description: "THE BEST SEGA MUSIC FROM EVERY GENERATION, LIVE 24/7",
+      sources: [
+        #("https://icecast.radiosega.net/rs-mpeg.mp3", "audio/mpeg"),
+      ],
+      art: "radiosega-circuit.gif",
+      accent: "accent-city",
+    ),
+    Room(
+      id: "gtt-radio",
+      name: "QUIZ ARENA",
+      station: "GAME THAT TUNE RADIO",
+      station_url: "https://gttradio.com/",
+      description: "24/7 VIDEO GAME MUSIC FROM MORE THAN 1,000 SOUNDTRACKS",
+      sources: [
+        #("https://icecast.gttradio.com/mp3_gtt_320k", "audio/mpeg"),
+      ],
+      art: "gtt-arena.gif",
+      accent: "accent-ocean",
+    ),
+    Room(
+      id: "ericade",
+      name: "DEMO HALL",
+      station: "ERICADE.RADIO",
+      station_url: "https://radio.ericade.net/",
+      description: "AMIGA, TRACKER, CHIPTUNE & DEMOSCENE MUSIC, LIVE 24/7",
+      sources: [
+        #("https://radio.ericade.net/sc/stream/1/", "audio/mpeg"),
+      ],
+      art: "ericade-demoparty.gif",
+      accent: "accent-space",
+    ),
   ]
 }
 
@@ -251,7 +329,7 @@ fn view_boot(saved_room: Option(Room)) -> Element(Msg) {
           )
       },
       html.p([attribute.class("credits")], [
-        element.text("6 STATIONS · 0 COINS REQUIRED"),
+        element.text("12 STATIONS · 0 COINS REQUIRED"),
       ]),
     ]),
   ])
