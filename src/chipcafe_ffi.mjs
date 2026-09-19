@@ -6,6 +6,7 @@ const REFILL_LOW_WATER_SECONDS = 12;
 const REQUEST_TIMEOUT_MS = 6000;
 const BARS_PER_BLOCK = 16;
 const BEATS_PER_BAR = 4;
+const VISUAL_STYLES = Object.freeze(["grid", "waves", "particles", "orbit", "bars", "pixels"]);
 
 const PRESETS = Object.freeze({
   cvgm: preset("Neon drive", 132, 48, [0, 2, 3, 5, 7, 8, 10], [0, 5, 3, 4], 0.82, "square"),
@@ -22,8 +23,27 @@ const PRESETS = Object.freeze({
   ericade: preset("Tracker stage", 138, 46, [0, 2, 3, 5, 7, 9, 10], [0, 5, 3, 6], 0.86, "sawtooth"),
 });
 
+const VISUAL_PRESETS = Object.freeze({
+  cvgm: visualPreset("neon skyline", ["#5dfdff", "#ff4fd8", "#6b5cff"], ["grid", "bars", "particles"]),
+  rainwave: visualPreset("sunset tide", ["#ffcc66", "#ff6b8a", "#58d7ff"], ["waves", "particles", "orbit"]),
+  nectarine: visualPreset("firefly grove", ["#a8ff60", "#ffe66d", "#43d17d"], ["particles", "waves", "pixels"]),
+  slay: visualPreset("castle forge", ["#c084fc", "#ff5c5c", "#ffd166"], ["bars", "grid", "particles"]),
+  kaaos: visualPreset("handheld matrix", ["#9bbc0f", "#8bac0f", "#306230"], ["pixels", "grid", "bars"]),
+  kohina: visualPreset("deep orbit", ["#c55cff", "#5d7cff", "#ffffff"], ["orbit", "particles", "waves"]),
+  "keygen-fm": visualPreset("code tunnel", ["#63ff9b", "#5dfdff", "#ff4fd8"], ["grid", "pixels", "bars"]),
+  "sid-station": visualPreset("sid chamber", ["#ff9f43", "#c084fc", "#5dfdff"], ["orbit", "bars", "waves"]),
+  rpgn: visualPreset("overworld map", ["#8dff78", "#ffd166", "#5da9ff"], ["pixels", "particles", "waves"]),
+  radiosega: visualPreset("turbo circuit", ["#ff4f6d", "#5dfdff", "#ffe66d"], ["grid", "bars", "orbit"]),
+  "gtt-radio": visualPreset("quiz party", ["#ff77d9", "#72f1b8", "#ffe66d"], ["particles", "bars", "pixels"]),
+  ericade: visualPreset("demo plasma", ["#8f7cff", "#ff4fd8", "#5dfdff"], ["waves", "orbit", "grid"]),
+});
+
 function preset(name, tempo, root, scale, progression, energy, leadWave) {
   return Object.freeze({ name, tempo, root, scale, progression, energy, leadWave });
+}
+
+function visualPreset(name, palette, styles) {
+  return Object.freeze({ name, palette: Object.freeze(palette), styles: Object.freeze(styles) });
 }
 
 let audioContext = null;
@@ -97,8 +117,15 @@ export function startPlayer(roomId, onStatus) {
     requestInFlight: false,
     apiCalls: 0,
     provenance: "local",
+    visualProgram: generateVisualProgram(roomId, roomPreset, 0, 0),
+    visualStartTime: context.currentTime,
+    visualTempo: roomPreset.tempo,
+    visualFrame: null,
+    visualFrames: 0,
+    reduceMotion: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
   };
   activeSession = session;
+  startVisualRenderer(session);
   emitStatus(session, "starting-audio");
 
   // This call is entered synchronously from the user's click. AudioContext is
@@ -130,6 +157,7 @@ async function beginSession(session) {
     emitStatus(session, "buffering");
     const timing = scheduleBlock(session, result.block);
     session.provenance = result.provenance;
+    scheduleVisualProgram(session, timing.startTime, result.block);
     scheduleStatus(session, timing.startTime, result.provenance);
     session.interval = window.setInterval(() => {
       void refillIfNeeded(session).catch(() => failSession(session));
@@ -148,6 +176,7 @@ async function refillIfNeeded(session) {
   const result = await composeNextBlock(session);
   if (!isActive(session)) return;
   const timing = scheduleBlock(session, result.block);
+  scheduleVisualProgram(session, timing.startTime, result.block);
   scheduleStatus(session, timing.startTime, result.provenance);
 }
 
@@ -187,12 +216,12 @@ async function chooseWithJev(session, candidates) {
     candidates.map((candidate) => [candidate.id, candidate.summary]),
   );
   const state = {
-    role: "You are directing an original generative chiptune radio stage.",
+    role: "You are directing an original generative chiptune and procedural animation stage.",
     room: session.preset.name,
     tempo: session.preset.tempo,
     energy: session.preset.energy,
     previous_block: session.previousSummary,
-    goal: "Choose the most coherent, interesting continuation without sounding repetitive.",
+    goal: "Choose the most coherent, interesting music-and-animation continuation without repetitive sound or motion.",
   };
 
   session.apiCalls += 1;
@@ -207,7 +236,7 @@ async function chooseWithJev(session, candidates) {
   const client = typesafeClient(config);
   const questions = {
     continuation: choice(
-      "Which candidate is the strongest musical continuation for this stage?",
+      "Which candidate is the strongest combined musical and visual continuation for this stage?",
       criteria,
     ),
   };
@@ -286,6 +315,7 @@ function stopActiveSession(suspendContext) {
   sessionSequence += 1;
   session.controller.abort();
   if (session.interval !== null) window.clearInterval(session.interval);
+  if (session.visualFrame !== null) window.cancelAnimationFrame(session.visualFrame);
   for (const timeout of session.timeouts) window.clearTimeout(timeout);
   for (const source of session.sources) {
     try {
@@ -325,6 +355,174 @@ function scheduleStatus(session, startTime, provenance) {
     emitStatus(session, provenance === "jev" ? "playing-jev" : "playing-local");
   }, delay);
   session.timeouts.add(timeout);
+}
+
+function scheduleVisualProgram(session, startTime, block) {
+  const delay = Math.max(0, (startTime - audioContext.currentTime) * 1000);
+  const timeout = window.setTimeout(() => {
+    session.timeouts.delete(timeout);
+    if (!isActive(session)) return;
+    session.visualProgram = block.visual;
+    session.visualStartTime = startTime;
+    session.visualTempo = block.tempo;
+    if (session.reduceMotion) drawVisualFrame(session);
+  }, delay);
+  session.timeouts.add(timeout);
+}
+
+function startVisualRenderer(session) {
+  drawVisualFrame(session);
+  if (session.reduceMotion) return;
+
+  const render = () => {
+    if (!isActive(session)) return;
+    drawVisualFrame(session);
+    session.visualFrame = window.requestAnimationFrame(render);
+  };
+  session.visualFrame = window.requestAnimationFrame(render);
+}
+
+function drawVisualFrame(session) {
+  const canvas = document.querySelector("canvas.room-visual");
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  const context = canvas.getContext("2d", { alpha: true });
+  if (!context) return;
+
+  const width = Math.max(1, Math.round(canvas.clientWidth));
+  const height = Math.max(1, Math.round(canvas.clientHeight));
+  const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+  const backingWidth = Math.round(width * pixelRatio);
+  const backingHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+  }
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const program = session.visualProgram;
+  const elapsed = Math.max(0, (audioContext?.currentTime || 0) - session.visualStartTime);
+  const beat = elapsed * session.visualTempo / 60;
+  const pulse = 0.82 + Math.max(0, Math.sin(beat * Math.PI * 2)) * 0.18 * program.pulse;
+  context.globalAlpha = pulse;
+  context.lineWidth = 2;
+
+  switch (program.style) {
+    case "grid": drawGrid(context, width, height, elapsed, program); break;
+    case "waves": drawWaves(context, width, height, elapsed, program); break;
+    case "particles": drawParticles(context, width, height, elapsed, program); break;
+    case "orbit": drawOrbit(context, width, height, elapsed, program); break;
+    case "bars": drawBars(context, width, height, beat, program); break;
+    case "pixels": drawPixels(context, width, height, elapsed, program); break;
+  }
+  context.globalAlpha = 1;
+  session.visualFrames += 1;
+}
+
+function drawGrid(context, width, height, time, program) {
+  const horizon = height * 0.43;
+  context.strokeStyle = program.palette[0];
+  for (let index = -8; index <= 8; index += 1) {
+    const bottomX = width / 2 + index * width / 8;
+    context.beginPath();
+    context.moveTo(width / 2, horizon);
+    context.lineTo(bottomX, height);
+    context.stroke();
+  }
+  const offset = (time * program.speed * 0.35) % 1;
+  for (let index = 0; index < 12; index += 1) {
+    const depth = (index + offset) / 12;
+    const y = horizon + depth * depth * (height - horizon);
+    context.strokeStyle = program.palette[index % program.palette.length];
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+}
+
+function drawWaves(context, width, height, time, program) {
+  const waveCount = Math.max(3, Math.round(program.density / 8));
+  for (let wave = 0; wave < waveCount; wave += 1) {
+    context.strokeStyle = program.palette[wave % program.palette.length];
+    context.beginPath();
+    for (let x = 0; x <= width; x += 8) {
+      const y = height * (wave + 1) / (waveCount + 1)
+        + Math.sin(x * 0.018 + time * program.speed * 2 + wave) * height * 0.045;
+      if (x === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+  }
+}
+
+function drawParticles(context, width, height, time, program) {
+  for (let index = 0; index < program.density; index += 1) {
+    const baseX = visualUnit(program.seed, index, 1);
+    const baseY = visualUnit(program.seed, index, 2);
+    const drift = visualUnit(program.seed, index, 3) * 0.6 + 0.4;
+    const x = (baseX * width + time * program.speed * drift * 24) % width;
+    const y = (baseY * height + Math.sin(time * drift + index) * 18 + height) % height;
+    const size = 2 + Math.floor(visualUnit(program.seed, index, 4) * 5);
+    context.fillStyle = program.palette[index % program.palette.length];
+    context.fillRect(Math.round(x), Math.round(y), size, size);
+  }
+}
+
+function drawOrbit(context, width, height, time, program) {
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const rings = Math.max(3, Math.round(program.density / 10));
+  for (let index = 0; index < rings; index += 1) {
+    const radius = Math.min(width, height) * (0.12 + index * 0.075);
+    context.strokeStyle = program.palette[index % program.palette.length];
+    context.beginPath();
+    context.ellipse(centerX, centerY, radius, radius * 0.48, index * 0.18, 0, Math.PI * 2);
+    context.stroke();
+    const angle = time * program.speed * (0.45 + index * 0.08) + index * 1.7;
+    const x = centerX + Math.cos(angle) * radius;
+    const y = centerY + Math.sin(angle) * radius * 0.48;
+    context.fillStyle = program.palette[(index + 1) % program.palette.length];
+    context.fillRect(Math.round(x - 3), Math.round(y - 3), 6, 6);
+  }
+}
+
+function drawBars(context, width, height, beat, program) {
+  const count = Math.max(10, Math.round(program.density / 2));
+  const barWidth = width / count;
+  for (let index = 0; index < count; index += 1) {
+    const phase = beat * program.speed + visualUnit(program.seed, index, 5) * Math.PI * 2;
+    const barHeight = height * (0.08 + Math.abs(Math.sin(phase)) * 0.34);
+    context.fillStyle = program.palette[index % program.palette.length];
+    context.fillRect(
+      Math.round(index * barWidth + 2),
+      Math.round(height - barHeight),
+      Math.max(2, Math.floor(barWidth - 4)),
+      Math.round(barHeight),
+    );
+  }
+}
+
+function drawPixels(context, width, height, time, program) {
+  const size = Math.max(18, Math.round(Math.min(width, height) / 16));
+  const columns = Math.ceil(width / size);
+  const rows = Math.ceil(height / size);
+  const phase = Math.floor(time * program.speed * 4);
+  for (let index = 0; index < program.density; index += 1) {
+    const cell = Math.floor(visualUnit(program.seed + phase, index, 6) * columns * rows);
+    const x = cell % columns;
+    const y = Math.floor(cell / columns);
+    context.fillStyle = program.palette[(index + phase) % program.palette.length];
+    context.globalAlpha = 0.22 + visualUnit(program.seed, index, 7) * 0.5;
+    context.fillRect(x * size, y * size, size - 2, size - 2);
+  }
+}
+
+function visualUnit(seed, index, salt) {
+  let value = seed ^ Math.imul(index + 1, 0x45d9f3b) ^ Math.imul(salt, 0x27d4eb2d);
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
 }
 
 function queuedSeconds(session) {
@@ -493,8 +691,10 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
   }
 
   const contour = ["rising hooks", "falling answers", "wide leaps", "tight motifs"][variation];
+  const visual = generateVisualProgram(roomId, roomPreset, blockIndex, candidateIndex);
+  const visualName = VISUAL_PRESETS[roomId].name;
   const id = `option_${candidateIndex}`;
-  const summary = `${contour}; progression ${progression.join("-")}; lead density ${leadDensity.toFixed(2)}; energy ${roomPreset.energy.toFixed(2)}; varies from ${previousSummary || "the opening"}`;
+  const summary = `${contour}; progression ${progression.join("-")}; lead density ${leadDensity.toFixed(2)}; energy ${roomPreset.energy.toFixed(2)}; ${visualName} ${visual.style} animation at speed ${visual.speed.toFixed(2)}; varies from ${previousSummary || "the opening"}`;
   return {
     schemaVersion: 1,
     id,
@@ -503,8 +703,24 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
     tempo: roomPreset.tempo,
     totalBeats,
     leadWave: roomPreset.leadWave,
+    visual,
     summary,
     events: events.sort((left, right) => left.beat - right.beat),
+  };
+}
+
+function generateVisualProgram(roomId, roomPreset, blockIndex, candidateIndex) {
+  const preset = VISUAL_PRESETS[roomId];
+  const seed = hashString(`${roomId}:${blockIndex}:${candidateIndex}:visual`);
+  const random = mulberry32(seed);
+  return {
+    schemaVersion: 1,
+    style: preset.styles[(blockIndex + candidateIndex) % preset.styles.length],
+    palette: [...preset.palette],
+    speed: Number((0.55 + roomPreset.energy * 0.7 + random() * 0.55).toFixed(3)),
+    density: Math.round(14 + roomPreset.energy * 20 + random() * 14),
+    pulse: Number((0.35 + roomPreset.energy * 0.5 + random() * 0.15).toFixed(3)),
+    seed,
   };
 }
 
@@ -534,6 +750,7 @@ export function validateCandidate(candidate) {
   if (!Number.isInteger(candidate.blockIndex) || candidate.blockIndex < 0) return false;
   if (candidate.tempo < 60 || candidate.tempo > 200) return false;
   if (candidate.totalBeats !== BARS_PER_BLOCK * BEATS_PER_BAR) return false;
+  if (!validateVisualProgram(candidate.visual, candidate.roomId)) return false;
   if (!Array.isArray(candidate.events) || candidate.events.length > 700) return false;
   return candidate.events.every((event) => {
     const validInstrument = ["lead", "arp", "bass", "kick", "snare", "hat"].includes(event.instrument);
@@ -552,6 +769,25 @@ export function validateCandidate(candidate) {
       && event.velocity > 0
       && event.velocity <= 1;
   });
+}
+
+function validateVisualProgram(visual, roomId) {
+  const preset = VISUAL_PRESETS[roomId];
+  if (!visual || visual.schemaVersion !== 1 || !preset) return false;
+  if (!VISUAL_STYLES.includes(visual.style) || !preset.styles.includes(visual.style)) return false;
+  if (!Array.isArray(visual.palette) || visual.palette.length !== preset.palette.length) return false;
+  if (!visual.palette.every((color, index) => /^#[0-9a-f]{6}$/i.test(color) && color === preset.palette[index])) return false;
+  return Number.isFinite(visual.speed)
+    && visual.speed >= 0.25
+    && visual.speed <= 2.5
+    && Number.isInteger(visual.density)
+    && visual.density >= 8
+    && visual.density <= 64
+    && Number.isFinite(visual.pulse)
+    && visual.pulse >= 0
+    && visual.pulse <= 1
+    && Number.isInteger(visual.seed)
+    && visual.seed >= 0;
 }
 
 export function selectLocalCandidate(candidates, roomId, blockIndex) {
@@ -587,6 +823,8 @@ export function playerDebugState() {
     apiCalls: activeSession?.apiCalls || 0,
     provenance: activeSession?.provenance || null,
     contextState: audioContext?.state || "unavailable",
+    visualStyle: activeSession?.visualProgram.style || null,
+    visualFrames: activeSession?.visualFrames || 0,
   };
 }
 

@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__chipcafeJevDecide = async ({ criteria }) => {
       await new Promise((resolve) => setTimeout(resolve, 350));
-      return Object.keys(criteria)[0];
+      return Object.keys(criteria)[1];
     };
   });
 });
@@ -23,6 +23,9 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.roomId).toBe("cvgm");
   expect(playing.queuedSeconds).toBeGreaterThan(12);
   expect(playing.provenance).toBe("jev");
+  expect(playing.visualStyle).toBe("bars");
+  expect(playing.visualFrames).toBeGreaterThan(0);
+  await expect(page.locator("canvas.room-visual")).toHaveCount(1);
 
   await page.getByRole("button", { name: /pause/i }).click();
   await expect(page.getByRole("status")).toHaveText("PAUSED");
@@ -49,4 +52,6 @@ test("falls back locally when Jev is not configured", async ({ page }) => {
   expect(state.active).toBe(true);
   expect(state.roomId).toBe("rainwave");
   expect(state.queuedSeconds).toBeGreaterThan(12);
+  expect(state.visualStyle).toBeTruthy();
+  expect(state.visualFrames).toBeGreaterThan(0);
 });

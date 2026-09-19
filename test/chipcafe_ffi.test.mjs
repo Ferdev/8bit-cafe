@@ -31,6 +31,9 @@ test("every room produces eight bounded, playable candidates", () => {
       assert.equal(validateCandidate(candidate), true, `${roomId}:${candidate.id}`);
       assert.equal(candidate.totalBeats, 64);
       assert.ok(candidate.events.length > 200);
+      assert.equal(candidate.visual.schemaVersion, 1);
+      assert.equal(candidate.visual.palette.length, 3);
+      assert.ok(candidate.visual.density >= 8);
     }
   }
 });
@@ -50,6 +53,26 @@ test("candidate validation rejects unsafe event data", () => {
   const invalid = structuredClone(candidate);
   invalid.events[0].velocity = 9;
   assert.equal(validateCandidate(invalid), false);
+});
+
+test("candidate validation rejects unsafe visual programs", () => {
+  const [candidate] = buildCandidates("cvgm", 0, "opening");
+  const invalidStyle = structuredClone(candidate);
+  invalidStyle.visual.style = "arbitrary-script";
+  assert.equal(validateCandidate(invalidStyle), false);
+
+  const invalidPalette = structuredClone(candidate);
+  invalidPalette.visual.palette[0] = "url(javascript:bad)";
+  assert.equal(validateCandidate(invalidPalette), false);
+});
+
+test("every room has deterministic visual variation", () => {
+  for (const roomId of roomIds) {
+    const first = buildCandidates(roomId, 2, "previous");
+    const second = buildCandidates(roomId, 2, "previous");
+    assert.deepEqual(first.map(({ visual }) => visual), second.map(({ visual }) => visual));
+    assert.ok(new Set(first.map(({ visual }) => visual.style)).size >= 3, roomId);
+  }
 });
 
 test("unknown rooms cannot generate candidates", () => {

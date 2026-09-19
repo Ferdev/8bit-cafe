@@ -472,6 +472,10 @@ fn view_room(
       attribute.alt(room.name),
       attribute.class("room-bg"),
     ]),
+    html.canvas([
+      attribute.class("room-visual"),
+      attribute.aria_hidden(True),
+    ]),
     html.div([attribute.class("room-overlay")], [
       html.header([attribute.class("room-header")], [
         html.button(
