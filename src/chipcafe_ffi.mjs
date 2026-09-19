@@ -16,8 +16,7 @@ const VISUAL_SCENES = Object.freeze([
 const TONAL_INSTRUMENTS = Object.freeze(["lead", "counter", "arp", "pulse", "pad", "bass", "stab", "texture"]);
 const PERCUSSION_INSTRUMENTS = Object.freeze(["kick", "snare", "hat"]);
 const OSCILLATOR_TYPES = Object.freeze(["sine", "square", "sawtooth", "triangle"]);
-const LAYERED_INSTRUMENTS = new Set(["lead", "counter", "pad", "stab", "texture"]);
-const DELAY_INSTRUMENTS = new Set(["lead", "counter", "arp", "texture"]);
+const LAYERED_INSTRUMENTS = new Set(["pad", "stab", "texture"]);
 
 const PRESETS = Object.freeze({
   cvgm: preset("Neon drive", 132, 48, [0, 2, 3, 5, 7, 8, 10], [0, 5, 3, 4], 0.82),
@@ -50,18 +49,18 @@ const MUSIC_PROFILES = Object.freeze({
 });
 
 const MELODY_PROFILES = Object.freeze({
-  cvgm: melodyProfile("neon signal", [0, null, 2, 4, 5, 4, 2, null, 0, 2, 4, 7, 5, 4, 2, null], [4, null, 5, 7, 9, 7, 5, null, 4, 2, 0, 2, 4, 2, 0, null]),
-  rainwave: melodyProfile("harbor lights", [0, null, null, 2, 4, null, 2, null, 5, null, null, 4, 2, null, 0, null], [2, null, 4, null, 5, null, 7, null, 5, null, 4, 2, 0, null, null, null]),
-  nectarine: melodyProfile("firefly dance", [0, 2, null, 4, 2, 5, null, 4, 2, 0, 2, 4, null, 2, 0, null], [4, 5, null, 7, 5, 4, 2, null, 0, 2, 4, 5, 4, 2, 0, null]),
-  slay: melodyProfile("citadel call", [0, null, 0, 3, 5, null, 3, 2, 0, 3, 5, 7, 6, 5, 3, null], [5, null, 7, 8, 7, 5, 3, null, 2, 3, 5, 6, 5, 3, 2, 0]),
-  kaaos: melodyProfile("pocket hero", [0, 2, 4, 2, 5, 4, 2, null, 0, 2, 4, 7, 5, 2, 0, null], [4, 4, 5, 7, 5, 4, 2, null, 2, 0, 2, 4, 2, 0, null, null]),
-  kohina: melodyProfile("distant beacon", [0, null, null, null, 4, null, null, 2, 5, null, null, 4, 2, null, null, null], [7, null, null, 5, 4, null, null, 2, 0, null, 2, null, 4, null, null, null]),
-  "keygen-fm": melodyProfile("unlock sequence", [0, 2, 3, 5, 7, 5, 3, 2, 0, 3, 5, 8, 7, 5, 3, null], [3, 5, 7, 8, 10, 8, 7, 5, 3, 2, 0, 2, 3, 5, 7, null]),
-  "sid-station": melodyProfile("sid invocation", [0, null, 3, 2, null, 5, 3, null, 0, 2, null, 4, 5, 4, 2, null], [3, null, 5, 7, null, 5, 4, 2, 0, null, 2, 3, 5, 3, 2, null]),
-  rpgn: melodyProfile("road to dawn", [0, null, 2, 4, 5, null, 4, 2, 0, 2, 4, 7, 5, 4, 2, 0], [4, null, 5, 7, 9, null, 7, 5, 4, 5, 4, 2, 0, 2, 0, null]),
-  radiosega: melodyProfile("final lap", [0, 2, 4, 5, 7, 5, 9, 7, 5, 4, 2, 4, 5, 7, 9, null], [7, 9, 10, 9, 7, 5, 4, 2, 0, 2, 4, 5, 7, 5, 4, null]),
-  "gtt-radio": melodyProfile("bonus round", [0, 4, 2, 5, 4, null, 2, 0, 2, 5, 4, 7, 5, 4, 2, null], [4, 7, 5, 9, 7, null, 5, 4, 2, 4, 5, 7, 5, 2, 0, null]),
-  ericade: melodyProfile("demo anthem", [0, 3, 5, 3, 7, 5, 3, 2, 0, 2, 5, 7, 8, 7, 5, 3], [5, 7, 8, 10, 8, 7, 5, 3, 2, 3, 5, 7, 5, 3, 2, null]),
+  cvgm: melodyProfile("neon signal", 0.5, 0.74, [0, null, 0, 7, null, 5, 4, null, 2, 4, 5, null, 9, 7, null, 2], [4, null, 4, 11, null, 9, 7, null, 5, 4, 2, null, 0, 2, 4, null]),
+  rainwave: melodyProfile("harbor lights", 1, 0.92, [0, null, 4, 2, null, 5, 4, null], [2, 4, null, 7, 5, null, 2, 0], ["ballad", "wide rests"]),
+  nectarine: melodyProfile("firefly dance", 0.5, 0.58, [0, 4, null, 2, 5, null, 7, 4, null, 2, 0, 2, null, 5, 4, null], [4, 7, null, 5, 9, null, 7, 5, 4, null, 2, 5, null, 4, 2, 0]),
+  slay: melodyProfile("citadel call", 0.5, 0.84, [0, 0, null, 7, 6, 6, null, 3, 0, null, 8, 7, 5, null, 3, 2], [5, 5, null, 12, 11, 8, null, 7, 3, null, 10, 8, 7, 5, 3, 0]),
+  kaaos: melodyProfile("pocket hero", 0.25, 0.52, [0, null, 2, 4, 7, 4, 2, null, 0, 2, 4, null, 5, 7, 9, null, 7, 5, 4, 2, 4, null, 0, null, 2, 4, 5, 2, 0, null, null, null], [4, null, 5, 7, 11, 7, 5, null, 4, 5, 7, null, 9, 11, 12, null, 9, 7, 5, 4, 2, null, 0, null, 2, 4, 7, 5, 4, 2, 0, null]),
+  kohina: melodyProfile("distant beacon", 1, 0.94, [0, null, null, 5, null, 2, null, null], [7, null, 4, null, null, 2, 0, null], ["ambient", "long tones"]),
+  "keygen-fm": melodyProfile("unlock sequence", 0.25, 0.48, [0, 3, 7, 10, 7, 3, 0, null, 2, 5, 8, 12, 8, 5, 2, null, 3, 7, 10, 14, 10, 7, 3, null, 5, 8, 12, 15, 12, 8, 5, null], [7, 10, 14, 17, 14, 10, 7, null, 5, 8, 12, 15, 12, 8, 5, null, 3, 7, 10, 14, 10, 7, 3, null, 2, 5, 8, 12, 8, 5, 3, 0]),
+  "sid-station": melodyProfile("sid invocation", 0.5, 0.62, [0, null, 3, null, 2, 5, null, 3, 0, 0, null, 7, 5, null, 3, 2], [3, null, 7, 5, null, 8, 7, null, 3, 2, null, 5, 3, 0, null, 2]),
+  rpgn: melodyProfile("road to dawn", 1, 0.9, [0, 2, 4, null, 7, 5, 4, 2], [4, 5, 7, 9, 11, 9, 7, null], ["anthem", "broad phrases"]),
+  radiosega: melodyProfile("final lap", 0.25, 0.56, [0, 2, 4, 7, 9, 7, 4, 2, 5, null, 9, 12, 11, 9, 7, null, 4, 5, 7, 9, 12, 9, 7, 5, 2, 4, 5, 7, 9, 11, 12, null], [7, 9, 11, 14, 12, 11, 9, 7, 5, null, 9, 12, 14, 12, 9, null, 7, 5, 4, 2, 0, 2, 4, 5, 7, 9, 7, 5, 4, 2, 0, null]),
+  "gtt-radio": melodyProfile("bonus round", 0.5, 0.5, [0, 7, null, 4, 2, 9, null, 5, 4, 11, 9, null, 2, 7, 5, null], [4, 12, null, 9, 7, 14, null, 11, 9, 5, 7, null, 4, 2, 0, null]),
+  ericade: melodyProfile("demo anthem", 0.25, 0.46, [0, 3, 5, null, 10, 8, 7, null, 3, 5, 7, 10, 12, null, 10, 8, 7, 5, 3, null, 0, 3, 7, null, 8, 10, 12, 15, 12, 10, 8, null], [5, 7, 8, null, 15, 12, 10, null, 8, 10, 12, 15, 17, null, 15, 12, 10, 8, 7, null, 3, 5, 8, null, 10, 12, 15, 12, 10, 8, 5, 3]),
 });
 
 const VISUAL_PRESETS = Object.freeze({
@@ -94,11 +93,14 @@ function musicProfile(name, groove, arpRate, swing, counterDensity, waves) {
   });
 }
 
-function melodyProfile(name, phraseA, phraseB) {
+function melodyProfile(name, stepBeats, gate, phraseA, phraseB, character = []) {
   return Object.freeze({
     name,
+    stepBeats,
+    gate,
     phraseA: Object.freeze(phraseA),
     phraseB: Object.freeze(phraseB),
+    character: Object.freeze(character),
   });
 }
 
@@ -114,7 +116,6 @@ function visualPreset(name, scene, backdrop, palette, styles) {
 
 let audioContext = null;
 let masterGain = null;
-let delaySend = null;
 let activeSession = null;
 let lobbyVisualFrame = null;
 let lobbyVisualFrames = 0;
@@ -414,19 +415,6 @@ function ensureAudioContext() {
   masterGain.gain.value = 0.145;
   masterGain.connect(compressor);
 
-  const delay = audioContext.createDelay(0.75);
-  const feedback = audioContext.createGain();
-  const delayWet = audioContext.createGain();
-  delay.delayTime.value = 0.285;
-  feedback.gain.value = 0.21;
-  delayWet.gain.value = 0.24;
-  delaySend = audioContext.createGain();
-  delaySend.gain.value = 1;
-  delaySend.connect(delay);
-  delay.connect(feedback);
-  feedback.connect(delay);
-  delay.connect(delayWet);
-  delayWet.connect(compressor);
   compressor.connect(audioContext.destination);
   return audioContext;
 }
@@ -1412,7 +1400,6 @@ function scheduleTone(session, when, duration, event, block) {
   }
   filter.connect(gain);
   gain.connect(masterGain);
-  if (DELAY_INSTRUMENTS.has(event.instrument)) gain.connect(delaySend);
   trackSource(session, oscillator);
   oscillator.start(when);
   oscillator.stop(when + duration + 0.01);
@@ -1525,14 +1512,16 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
       events.push(note("arp", beat, profile.arpRate * 0.72, arpPitch, Math.min(1, arpVelocity)));
     }
 
-    for (let step = 0; step < 8; step += 1) {
-      const phraseIndex = (bar % 2) * 8 + step;
+    const melodyStepsPerBar = Math.round(BEATS_PER_BAR / melody.stepBeats);
+    for (let step = 0; step < melodyStepsPerBar; step += 1) {
+      const phraseIndex = (bar % 2) * melodyStepsPerBar + step;
       const degree = phrase[phraseIndex];
       if (degree === null) continue;
       const octaveLift = section === 3 && variation === 2 ? 12 : 0;
       const leadPitch = scalePitch(roomPreset, degree, 1) + octaveLift;
-      const duration = melodyNoteDuration(phrase, phraseIndex);
-      events.push(note("lead", barBeat + step * 0.5 + (step % 2 ? profile.swing : 0), duration, leadPitch, Math.min(1, (0.5 + roomPreset.energy * 0.18) * sectionEnergy)));
+      const duration = melodyNoteDuration(melody, phrase, phraseIndex);
+      const melodySwing = melody.stepBeats < 1 && step % 2 ? profile.swing : 0;
+      events.push(note("lead", barBeat + step * melody.stepBeats + melodySwing, duration, leadPitch, Math.min(1, (0.5 + roomPreset.energy * 0.18) * sectionEnergy)));
     }
 
     for (let beat = 0; beat < BEATS_PER_BAR; beat += 1) {
@@ -1544,7 +1533,7 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
 
     for (const offset of [1.5, 3.5]) {
       if ((section > 0 || bar === 1) && random() < profile.counterDensity + section * 0.07) {
-        const answerIndex = (bar % 2) * 8 + Math.round(offset * 2);
+        const answerIndex = (bar % 2) * melodyStepsPerBar + Math.round(offset / melody.stepBeats);
         const answerDegree = phrase[answerIndex] ?? chordDegree + 4;
         events.push(note("counter", barBeat + offset, 0.42, scalePitch(roomPreset, answerDegree, 2), Math.min(1, (0.31 + roomPreset.energy * 0.13) * sectionEnergy)));
       }
@@ -1578,7 +1567,7 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
   const visualName = VISUAL_PRESETS[roomId].name;
   const id = `option_${candidateIndex}`;
   const hookSummary = melody.phraseA.map((degree) => degree === null ? "r" : degree).join("-");
-  const summary = `${profile.name} ${profile.groove} arrangement built around the repeating ${melody.name} melody (${hookSummary}), with eight tonal voices, ${arrangement}, intro/theme/lift/chorus/finale form, extended progression ${progression.join("-")}, and energy ${roomPreset.energy.toFixed(2)}; literal animated pixel-art ${visualName} ${visual.scene} scene at speed ${visual.speed.toFixed(2)}; varies the arrangement from ${previousSummary || "the opening"} while preserving the hook`;
+  const summary = `${profile.name} ${profile.groove} arrangement built around the repeating ${melody.name} melody (${hookSummary}) on a ${melody.stepBeats}-beat grid${melody.character.length ? ` with ${melody.character.join(" and ")}` : ""}, with eight tonal voices, ${arrangement}, intro/theme/lift/chorus/finale form, extended progression ${progression.join("-")}, and energy ${roomPreset.energy.toFixed(2)}; literal animated pixel-art ${visualName} ${visual.scene} scene at speed ${visual.speed.toFixed(2)}; varies the arrangement from ${previousSummary || "the opening"} while preserving the hook`;
   return {
     schemaVersion: 1,
     id,
@@ -1588,6 +1577,7 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
     totalBeats,
     profile: profile.name,
     melody: melody.name,
+    melodyStep: melody.stepBeats,
     form,
     hook: [...melody.phraseA],
     waves: { ...profile.waves },
@@ -1605,10 +1595,10 @@ function sectionForBar(bar) {
   return 4;
 }
 
-function melodyNoteDuration(phrase, index) {
+function melodyNoteDuration(melody, phrase, index) {
   let steps = 1;
   while (steps < 4 && phrase[index + steps] === null) steps += 1;
-  return Math.max(0.38, steps * 0.5 - 0.08);
+  return Math.max(0.12, steps * melody.stepBeats * melody.gate);
 }
 
 function grooveStabPattern(groove, bar) {
@@ -1712,6 +1702,7 @@ export function validateCandidate(candidate) {
   if (candidate.profile !== profile.name || !validateWaves(candidate.waves)) return false;
   const melody = MELODY_PROFILES[candidate.roomId];
   if (candidate.melody !== melody.name) return false;
+  if (candidate.melodyStep !== melody.stepBeats) return false;
   if (!Array.isArray(candidate.form)
     || candidate.form.join(",") !== "intro,theme-a,lift,chorus,finale") return false;
   if (!Array.isArray(candidate.hook)

@@ -6,17 +6,19 @@ AI's Jev model to choose the next continuation, and synthesizes the result with
 the Web Audio API. Candidates follow an evolving intro/theme/lift/chorus/finale
 form and layer eight tonal voices (lead, counter-melody, arpeggio, pulse, pad,
 bass, chord stabs, and texture) over channel-specific drum and groove rules.
-Recurring themes return between sections, while layered oscillators,
-per-voice filters, and a short chip delay give the voices more depth.
-Each stage has its own original two-part melody. The arrangement repeats that
-theme clearly across the block while Jev varies the surrounding harmony,
+Recurring themes return between sections, while supporting layered oscillators
+and per-voice filters give the arrangement depth without doubling the lead.
+Each stage has its own original two-part melody and rhythmic grid, from broad
+one-beat themes to rapid quarter-beat tracker lines. The arrangement repeats
+that theme clearly across the block while Jev varies the surrounding harmony,
 orchestration, intensity, and scene treatment.
 Every candidate also contains a bounded procedural scene program, so the same
-Jev decision directs the room's full-screen canvas animation in sync with the
-selected musical block. The scenes render as animated 320-pixel-wide pixel-art
-vignettes with room-specific environments and sprites. The lobby renders the
-same scene system in lightweight animated canvases, so the thumbnail is a true
-preview of the room. The former GIFs are no longer displayed.
+Jev decision directs the room's browser-rendered full-screen canvas animation
+in sync with the selected musical block. Jev selects typed scene parameters; it
+does not return image pixels. The scenes render as animated 320-pixel-wide
+pixel-art vignettes with room-specific environments and sprites. The lobby
+renders the same scene system in lightweight animated canvases, so the thumbnail
+is a true preview of the room. The former GIFs are no longer displayed.
 
 The app remains a static Gleam/Lustre site. It has no application backend. When
 a stage starts, the UI shows the current `STARTING AUDIO`, `COMPOSING`, and

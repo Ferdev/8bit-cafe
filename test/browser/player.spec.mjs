@@ -2,6 +2,15 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
+    window.__chipcafeDelayNodes = 0;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const originalCreateDelay = AudioContextClass?.prototype.createDelay;
+    if (originalCreateDelay) {
+      AudioContextClass.prototype.createDelay = function (...args) {
+        window.__chipcafeDelayNodes += 1;
+        return originalCreateDelay.apply(this, args);
+      };
+    }
     window.__chipcafeJevDecide = async ({ criteria }) => {
       await new Promise((resolve) => setTimeout(resolve, 350));
       return Object.keys(criteria)[1];
@@ -36,6 +45,7 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.visualScene).toBe("skyline");
   expect(playing.visualStyle).toBe("bars");
   expect(playing.visualFrames).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__chipcafeDelayNodes)).toBe(0);
   await expect(page.locator("canvas.room-visual")).toHaveCount(1);
   const canvasPixels = await page.locator("canvas.room-visual").evaluate((canvas) => ({
     width: canvas.width,
