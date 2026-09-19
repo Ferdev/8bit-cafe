@@ -387,45 +387,28 @@ img {
 .room {
   height: 100vh;
   overflow: hidden;
-}
-
-.room-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scale(1.02);
-  filter: saturate(0.72) brightness(0.62);
+  background: #06040e;
 }
 
 .room-visual {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
   image-rendering: pixelated;
-  mix-blend-mode: screen;
-  opacity: 0.78;
+  opacity: 1;
 }
 
 .room-overlay {
   position: relative;
-  z-index: 2;
+  z-index: 1;
   height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 24px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .room-visual {
-    opacity: 0.55;
-  }
 }
 
 .room-header {

@@ -467,11 +467,6 @@ fn view_room(
   saved_room: Option(Room),
 ) -> Element(Msg) {
   html.div([attribute.class("screen room " <> room.accent)], [
-    html.img([
-      attribute.src(room.art),
-      attribute.alt(room.name),
-      attribute.class("room-bg"),
-    ]),
     html.canvas([
       attribute.class("room-visual"),
       attribute.aria_hidden(True),

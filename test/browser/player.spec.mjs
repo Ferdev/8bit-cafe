@@ -23,9 +23,13 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.roomId).toBe("cvgm");
   expect(playing.queuedSeconds).toBeGreaterThan(12);
   expect(playing.provenance).toBe("jev");
+  expect(playing.musicProfile).toBe("night-drive");
+  expect(playing.tonalVoices).toBe(6);
+  expect(playing.visualScene).toBe("skyline");
   expect(playing.visualStyle).toBe("bars");
   expect(playing.visualFrames).toBeGreaterThan(0);
   await expect(page.locator("canvas.room-visual")).toHaveCount(1);
+  await expect(page.locator("img.room-bg")).toHaveCount(0);
 
   await page.getByRole("button", { name: /pause/i }).click();
   await expect(page.getByRole("status")).toHaveText("PAUSED");
@@ -74,11 +78,15 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
   let requestMetadata = null;
   await page.route("**/typesafe/v1/systemone", async (route) => {
     const request = route.request();
+    const payload = request.postDataJSON();
     requestMetadata = {
       authorizationPresent: request.headers().authorization === "Bearer test-only-browser-key",
       relayKeyPresent: request.headers()["x-chipcafe-jev-key"] === "test-only-browser-key",
       origin: new URL(request.url()).origin,
       path: new URL(request.url()).pathname,
+      musicProfile: payload.state.music_profile,
+      tonalVoices: payload.state.available_voices.length,
+      visualScene: payload.state.visual_scene,
     };
     await route.fulfill({
       contentType: "application/json",
@@ -107,6 +115,9 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
     relayKeyPresent: true,
     origin: "http://127.0.0.1:8123",
     path: "/typesafe/v1/systemone",
+    musicProfile: "night-drive",
+    tonalVoices: 6,
+    visualScene: "skyline",
   });
   const state = await page.evaluate(() => window.__chipcafePlayerDebug());
   expect(state.provenance).toBe("jev");

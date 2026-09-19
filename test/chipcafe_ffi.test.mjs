@@ -30,8 +30,14 @@ test("every room produces eight bounded, playable candidates", () => {
     for (const candidate of candidates) {
       assert.equal(validateCandidate(candidate), true, `${roomId}:${candidate.id}`);
       assert.equal(candidate.totalBeats, 64);
-      assert.ok(candidate.events.length > 200);
+      assert.ok(candidate.events.length > 350);
+      assert.deepEqual(
+        new Set(candidate.events.map(({ instrument }) => instrument)),
+        new Set(["lead", "counter", "arp", "pulse", "pad", "bass", "kick", "snare", "hat"]),
+      );
+      assert.equal(Object.keys(candidate.waves).length, 6);
       assert.equal(candidate.visual.schemaVersion, 1);
+      assert.ok(candidate.visual.scene);
       assert.equal(candidate.visual.palette.length, 3);
       assert.ok(candidate.visual.density >= 8);
     }
@@ -64,6 +70,17 @@ test("candidate validation rejects unsafe visual programs", () => {
   const invalidPalette = structuredClone(candidate);
   invalidPalette.visual.palette[0] = "url(javascript:bad)";
   assert.equal(validateCandidate(invalidPalette), false);
+
+  const invalidScene = structuredClone(candidate);
+  invalidScene.visual.scene = "external-video";
+  assert.equal(validateCandidate(invalidScene), false);
+});
+
+test("every room has a distinct arrangement and generated scene", () => {
+  const candidates = roomIds.map((roomId) => buildCandidates(roomId, 0, "opening")[0]);
+  assert.equal(new Set(candidates.map(({ profile }) => profile)).size, roomIds.length);
+  assert.equal(new Set(candidates.map(({ visual }) => visual.scene)).size, roomIds.length);
+  assert.ok(candidates.some(({ events }) => events.length > 700));
 });
 
 test("every room has deterministic visual variation", () => {

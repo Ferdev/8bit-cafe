@@ -3,9 +3,12 @@
 8bit.cafe is a browser-based generative chiptune player. Each stage has its own
 musical preset. The frontend generates valid 16-bar candidates, asks TypeSafe
 AI's Jev model to choose the next continuation, and synthesizes the result with
-the Web Audio API. Every candidate also contains a bounded procedural visual
-program, so the same Jev decision directs the room's canvas animation in sync
-with the selected musical block.
+the Web Audio API. Candidates layer six tonal voices (lead, counter-melody,
+arpeggio, pulse, pad, and bass) over channel-specific drum and groove rules.
+Every candidate also contains a bounded procedural scene program, so the same
+Jev decision directs the room's full-screen canvas animation in sync with the
+selected musical block. These generated scenes replace the former GIF room
+backgrounds; GIFs remain only as lobby thumbnails.
 
 The app remains a static Gleam/Lustre site. It has no application backend. When
 a stage starts, the UI shows the current `STARTING AUDIO`, `COMPOSING`, and
