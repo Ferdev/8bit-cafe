@@ -12,7 +12,7 @@ Each stage has its own original two-part melody and rhythmic grid, from broad
 one-beat themes to rapid quarter-beat tracker lines. The arrangement repeats
 that theme clearly across the block while Jev varies the surrounding harmony,
 orchestration, intensity, and scene treatment.
-Jev also composes the artwork from an original sprite and tile library. The
+Jev also composes the artwork and paints its sprite library. The
 same request includes three independent typed choices: setting, cast, and
 atmosphere. Each room has three settings, three casts, and three atmospheres
 (27 combinations), including cafes, cottages, a harbor, a studio and an arcade.
@@ -20,14 +20,35 @@ Characters, tiled roofs, brickwork, shop signs, furniture and plants are drawn
 on a fixed 320×180 pixel canvas with a sixteen-colour palette (four colours in
 Pocket pulse). Character frames, water, rain, equipment and other small details
 animate at twelve frames per second; reduced-motion mode shows a still frame.
-Jev chooses the composition; the authored library supplies the pixels.
+Once music is buffered, the browser asks Jev to paint the room's character,
+animal and small prop sprites. First Jev chooses proportions, features and
+markings. The app rasterizes those choices into an anatomy guide, then each
+typed pixel question chooses a palette colour or transparency. Finished sprites
+from the fallback library are never sent as generation references. A separate
+pass paints the moving parts of a second character
+frame. Buildings, furniture, landscapes and the scene animation code remain
+authored. No generated JavaScript or drawing commands are executed.
+
+Painting runs in the background in batches of at most 96 pixel questions, up
+to six requests per sprite, including its design (eight sprite types across the library). Only
+sprites needed by the selected room are requested, one at a time, with a
+six-second timeout and no automatic retry. Complete sheets are checked for
+dimensions, palette and connected shapes before replacing the fallback art.
+An unavailable or invalid result leaves the original sprite visible, and an
+unavailable animation pass retains the generated base frame. Pausing or leaving
+the room cancels pending requests. Validated sprites are cached per room for
+the page visit, including across pause/resume, and shared with lobby thumbnails.
+These extra pixel questions use the same browser key and its usage budget.
 
 The lobby uses the same renderer and remembers the latest selected composition
 for each room during the page visit. Before a room has played, its thumbnail
 shows a local default without making an API call. Scene backgrounds are cached
 by room, setting and atmosphere, with a limit of 24 cached backgrounds. The full
 scene keeps its proportions and sits above the controls on narrow screens.
-No image-generation service or additional credential is required.
+No additional service or credential is required. The credential-free debug
+view `window.__chipcafePlayerDebug()` includes `spriteStatus`, `spriteApiCalls`,
+`generatedSprites` and `generatedSpriteFrames` to distinguish painting,
+validated results and fallback art.
 
 The app remains a static Gleam/Lustre site. It has no application backend. When
 a stage starts, the UI shows the current `STARTING AUDIO`, `COMPOSING`, and

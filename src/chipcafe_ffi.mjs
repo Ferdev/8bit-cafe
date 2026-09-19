@@ -2,8 +2,9 @@ import { choice, TypeSafeClient } from "@typesafe-ai/sdk";
 import {
   ART_DIRECTIONS, composeVisualProgram, createVisualProgram,
   describeVisualProgram, renderPixelScene, validateVisualProgram,
-  visualChoiceCriteria,
+  visualChoiceCriteria, spritesForProgram,
 } from "./chipcafe_art.mjs";
+import { generateSprite } from "./chipcafe_jev_sprites.mjs";
 
 const favoriteKey = "8bit-cafe.favorite-room";
 const STARTUP_BUFFER_SECONDS = 12;
@@ -97,6 +98,14 @@ let cachedClient = null;
 let cachedClientKey = "";
 let noiseBuffer = null;
 const rememberedVisualPrograms = new Map();
+// At most eight tiny sprite sheets per room, retained only for this page visit.
+// Never persist API credentials or regenerate sprites on each musical block.
+const spriteRooms = new Map();
+
+function roomSprites(roomId) {
+  if (!spriteRooms.has(roomId)) spriteRooms.set(roomId, { atlas: Object.freeze({}), failed: new Set() });
+  return spriteRooms.get(roomId);
+}
 
 export function loadFavorite() {
   try {
@@ -167,6 +176,9 @@ export function startPlayer(roomId, onStatus) {
     visualStartTime: context.currentTime,
     visualFrame: null,
     visualFrames: 0,
+    spriteRequestInFlight: false,
+    spriteApiCalls: 0,
+    spriteStatus: "idle",
     reduceMotion: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
   };
   activeSession = session;
@@ -209,7 +221,7 @@ export function startLobbyVisuals() {
       for (const canvas of document.querySelectorAll("canvas.room-art[data-room-id]")) {
         const roomId = canvas.dataset.roomId;
         const program = programs[roomId];
-        if (program) renderPixelScene(canvas, program, elapsed);
+        if (program) renderPixelScene(canvas, program, elapsed, roomSprites(roomId).atlas);
       }
       lastPaint = timestamp;
       lobbyVisualFrames += 1;
@@ -294,7 +306,7 @@ async function chooseWithJev(session, candidates) {
   );
   const visualCriteria = visualChoiceCriteria(session.roomId);
   const state = {
-    role: "You are composing original chiptune and a detailed 8-bit sprite scene from an authored art library.",
+    role: "You are composing original chiptune and a detailed 8-bit scene with Jev-painted sprites and authored scenery.",
     room: session.preset.name,
     tempo: session.preset.tempo,
     energy: session.preset.energy,
@@ -341,6 +353,54 @@ async function chooseWithJev(session, candidates) {
   return Object.fromEntries(["continuation", "setting", "cast", "atmosphere"].map((key) => [
     key, response.answers[key]?.choice,
   ]));
+}
+
+async function paintRoomSprites(session) {
+  if (!isActive(session) || session.spriteRequestInFlight) return;
+  const config = browserConfig();
+  const testProvider = globalThis.__chipcafeJevPaint;
+  if (!config.typesafeApiKey && typeof testProvider !== "function") {
+    session.spriteStatus = "unconfigured";
+    return;
+  }
+  const room = roomSprites(session.roomId);
+  session.spriteRequestInFlight = true;
+  session.spriteStatus = "painting";
+  try {
+    while (isActive(session)) {
+      const names = spritesForProgram(session.visualProgram);
+      const name = names.find((name) => !room.atlas[name] && !room.failed.has(name));
+      if (!name) {
+        session.spriteStatus = names.every((name) => room.atlas[name]) ? "ready" : "fallback";
+        break;
+      }
+      try {
+        const frames = await generateSprite(session.visualProgram, name, (payload) => {
+          session.spriteApiCalls++;
+          if (typeof testProvider === "function") {
+            return withDeadline(Promise.resolve(testProvider(payload)), session);
+          }
+          return typesafeClient(config).systemOne({
+            ...payload, model: config.typesafeModel || "jev-latest",
+          }, {
+            signal: session.controller.signal, timeout: REQUEST_TIMEOUT_MS, retry: { maxRetries: 0 },
+          });
+        }, session.controller.signal);
+        if (!isActive(session)) return;
+        // Publish only complete, validated sheets. Replacing the atlas also
+        // invalidates backgrounds containing plants/crates in the scene cache.
+        room.atlas = Object.freeze({ ...room.atlas, [name]: frames });
+        if (session.reduceMotion) drawVisualFrame(session);
+      } catch (_error) {
+        if (!isActive(session)) return;
+        // No automatic retries or remote error logging (SDK errors can include
+        // request headers). Keep the authored sprite on failure for this visit.
+        room.failed.add(name);
+      }
+    }
+  } finally {
+    session.spriteRequestInFlight = false;
+  }
 }
 
 function typesafeClient(config) {
@@ -458,6 +518,8 @@ function scheduleVisualProgram(session, startTime, block) {
     rememberedVisualPrograms.set(session.roomId, block.visual);
     session.visualStartTime = startTime;
     if (session.reduceMotion) drawVisualFrame(session);
+    // Audio is already buffered. Painting never delays playback or refills.
+    void paintRoomSprites(session);
   }, delay);
   session.timeouts.add(timeout);
 }
@@ -482,7 +544,7 @@ function drawVisualFrame(session) {
   const canvas = document.querySelector("canvas.room-visual");
   if (!(canvas instanceof HTMLCanvasElement)) return;
   const elapsed = Math.max(0, (audioContext?.currentTime || 0) - session.visualStartTime);
-  renderPixelScene(canvas, session.visualProgram, session.reduceMotion ? 0 : elapsed);
+  renderPixelScene(canvas, session.visualProgram, session.reduceMotion ? 0 : elapsed, roomSprites(session.roomId).atlas);
   session.visualFrames += 1;
 }
 
@@ -929,6 +991,11 @@ export function playerDebugState() {
     visualAtmosphere: activeSession?.visualProgram.atmosphere || null,
     visualProvenance: activeSession?.visualProvenance || null,
     visualFrames: activeSession?.visualFrames || 0,
+    spriteStatus: activeSession?.spriteStatus || null,
+    spriteApiCalls: activeSession?.spriteApiCalls || 0,
+    generatedSprites: activeSession ? Object.keys(roomSprites(activeSession.roomId).atlas) : [],
+    generatedSpriteFrames: activeSession ? Object.values(roomSprites(activeSession.roomId).atlas)
+      .reduce((total, frames) => total + frames.length, 0) : 0,
     lobbyVisualFrames,
   };
 }

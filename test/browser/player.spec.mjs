@@ -94,6 +94,8 @@ test("falls back locally when Jev is not configured", async ({ page }) => {
   expect(state.visualSetting).toBeTruthy();
   expect(state.visualProvenance).toBe("local");
   expect(state.visualFrames).toBeGreaterThan(0);
+  expect(state.spriteStatus).toBe("unconfigured");
+  expect(state.spriteApiCalls).toBe(0);
 });
 
 test("sends the SDK request through the same-origin Jev relay", async ({ page }) => {
@@ -112,9 +114,35 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
   }));
 
   let requestMetadata = null;
+  const paintRequests = [];
   await page.route("**/typesafe/v1/systemone", async (route) => {
     const request = route.request();
     const payload = request.postDataJSON();
+    if (["design_sprite", "paint_sprite", "animate_sprite"].includes(payload.state.task)) {
+      paintRequests.push({
+        sprite: payload.state.sprite,
+        task: payload.state.task,
+        pixels: Object.keys(payload.questions).length,
+        relayKeyPresent: request.headers()["x-chipcafe-jev-key"] === "test-only-browser-key",
+      });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          answers: Object.fromEntries(Object.keys(payload.questions).map((key) => {
+            if (payload.state.task === "design_sprite") {
+              const choice = Object.keys(payload.questions[key].criteria)[1];
+              return [key, { type: "choice", choice, confidence: 1, probabilities: { [choice]: 1 } }];
+            }
+            const [, x, y] = key.split("_").map(Number);
+            const original = payload.state.reference_grid[y][x];
+            const colour = original === "r" && Object.hasOwn(payload.questions[key].criteria, "R") ? "R" : original;
+            return [key, { type: "choice", choice: colour, confidence: 1, probabilities: { [colour]: 1 } }];
+          })),
+          model: "jev-test", usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+      });
+      return;
+    }
     requestMetadata = {
       authorizationPresent: request.headers().authorization === "Bearer test-only-browser-key",
       relayKeyPresent: request.headers()["x-chipcafe-jev-key"] === "test-only-browser-key",
@@ -168,6 +196,110 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
   expect(state.visualCast).toBe("courier");
   expect(state.visualAtmosphere).toBe("mist");
   expect(state.visualProvenance).toBe("jev");
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("ready");
+  expect((await page.evaluate(() => window.__chipcafePlayerDebug().generatedSprites)).sort()).toEqual(["fern", "person", "robot"]);
+  expect(paintRequests.length).toBe(15);
+  expect(paintRequests.every(({ pixels, relayKeyPresent }) => pixels <= 96 && relayKeyPresent)).toBe(true);
+  expect(paintRequests.some(({ task }) => task === "animate_sprite")).toBe(true);
+});
+
+test("Jev paints pixels during playback, updates thumbnails and reuses sprites on resume", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    window.__paintCalls = 0;
+    window.__allowPaint = false;
+    window.__chipcafeJevPaint = async ({ state, questions }) => {
+      window.__paintCalls++;
+      while (!window.__allowPaint) await new Promise((resolve) => setTimeout(resolve, 25));
+      return { answers: Object.fromEntries(Object.keys(questions).map((key) => {
+        if (state.task === "design_sprite") return [key, { choice: Object.keys(questions[key].criteria)[1] }];
+        const [, x, y] = key.split("_").map(Number);
+        const original = state.reference_grid[y][x];
+        return [key, { choice: original === "r" ? "R" : original }];
+      })) };
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  expect(await page.evaluate(() => window.__paintCalls)).toBe(0);
+  await page.locator(".room-card").first().click();
+  await expect(page.getByRole("status")).toContainText("JEV GENERATING LIVE");
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("painting");
+  expect(await page.evaluate(() => window.__chipcafePlayerDebug().queuedSeconds)).toBeGreaterThan(12);
+  const canvas = page.locator("canvas.room-visual");
+  const before = await canvas.evaluate((canvas) => canvas.toDataURL());
+  await page.evaluate(() => { window.__allowPaint = true; });
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("ready");
+  const painted = await canvas.evaluate((canvas) => canvas.toDataURL());
+  expect(painted).not.toBe(before);
+  const state = await page.evaluate(() => window.__chipcafePlayerDebug());
+  expect(state.generatedSprites).toEqual(["person", "fern"]);
+  expect(state.generatedSpriteFrames).toBe(3);
+  expect(state.spriteApiCalls).toBe(10);
+
+  await page.getByRole("button", { name: /pause/i }).click();
+  await expect(page.getByRole("status")).toHaveText("PAUSED");
+  await page.getByRole("button", { name: /play/i }).click();
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("ready");
+  expect(await page.evaluate(() => window.__chipcafePlayerDebug().spriteApiCalls)).toBe(0);
+  expect(await page.evaluate(() => window.__paintCalls)).toBe(10);
+  expect(await canvas.evaluate((canvas) => canvas.toDataURL())).toBe(painted);
+  await page.getByRole("button", { name: /lobby/i }).click();
+  await expect.poll(() => page.locator("canvas.room-art").first().evaluate((canvas) => canvas.toDataURL())).toBe(painted);
+  expect(await page.evaluate(() => window.__paintCalls)).toBe(10);
+});
+
+test("leaving a room cancels painting without publishing late pixels or starting more requests", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__paintCalls = 0;
+    window.__chipcafeJevPaint = async ({ state, questions }) => {
+      window.__paintCalls++;
+      await new Promise((resolve) => { window.__finishPaint = resolve; });
+      return { answers: Object.fromEntries(Object.keys(questions).map((key) => {
+        if (state.task === "design_sprite") return [key, { choice: Object.keys(questions[key].criteria)[1] }];
+        const [, x, y] = key.split("_").map(Number);
+        return [key, { choice: state.reference_grid[y][x] }];
+      })) };
+    };
+  });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.name));
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  await page.locator(".room-card").first().click();
+  await expect.poll(() => page.evaluate(() => window.__paintCalls)).toBe(1);
+  await page.getByRole("button", { name: /lobby/i }).click();
+  await page.evaluate(async () => {
+    window.__finishPaint();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  expect(await page.evaluate(() => window.__paintCalls)).toBe(1);
+  await page.locator(".room-card").first().click();
+  await expect.poll(() => page.evaluate(() => window.__paintCalls)).toBe(2);
+  expect(await page.evaluate(() => window.__chipcafePlayerDebug().generatedSprites)).toEqual([]);
+  await page.getByRole("button", { name: /lobby/i }).click();
+  expect(errors).toEqual([]);
+});
+
+test("invalid sprite pixels retain the authored art while music keeps playing", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__chipcafeJevPaint = async ({ state, questions }) => state.task === "design_sprite"
+      ? { answers: Object.fromEntries(Object.entries(questions).map(([key, question]) => [key, { choice: Object.keys(question.criteria)[0] }])) }
+      : { answers: {} };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  await page.locator(".room-card").first().click();
+  await expect(page.getByRole("status")).toContainText("JEV GENERATING LIVE");
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("fallback");
+  const state = await page.evaluate(() => window.__chipcafePlayerDebug());
+  expect(state.generatedSprites).toEqual([]);
+  expect(state.spriteApiCalls).toBe(4);
+  expect(state.queuedSeconds).toBeGreaterThan(12);
+  await page.getByRole("button", { name: /pause/i }).click();
+  await page.getByRole("button", { name: /play/i }).click();
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().spriteStatus)).toBe("fallback");
+  expect(await page.evaluate(() => window.__chipcafePlayerDebug().spriteApiCalls)).toBe(0);
 });
 
 test("all sprite settings render distinct art and the lobby remembers Jev's composition", async ({ page }) => {

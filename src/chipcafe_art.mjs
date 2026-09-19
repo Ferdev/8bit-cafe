@@ -1,5 +1,5 @@
-// Original, hand-drawn indexed sprites. Jev composes these known parts; no
-// remote image, generated code, or arbitrary drawing command is executed.
+// Authored scenery and fallback sprites. Validated Jev pixel grids replace the
+// sprites at runtime; no generated code or arbitrary drawing command executes.
 export const ART_WIDTH = 320;
 export const ART_HEIGHT = 180;
 
@@ -262,6 +262,25 @@ kkkkkkkkkkkkkkkk
 `)],
 });
 
+// References give independent pixel decisions a shared silhouette and scale.
+// Return copies: generated pixels must never mutate the offline library.
+export function spriteReference(name) {
+  if (!Object.hasOwn(SPRITES, name)) return null;
+  const width = Math.max(...SPRITES[name].flat().map((row) => row.length));
+  return SPRITES[name].map((frame) => frame.map((row) => row.padEnd(width, ".")));
+}
+
+export function spritesForProgram(program) {
+  if (!validateVisualProgram(program, program?.roomId)) return [];
+  const scenery = {
+    skyline: ["fern"], coast: ["gull", "crate"], forest: ["mushroom", "fern"],
+    castle: ["fern"], handheld: ["mushroom", "fern"], cosmos: ["crate"],
+    "code-tunnel": ["fern"], "chip-studio": ["fern"], overworld: ["mushroom"],
+    "turbo-road": [], "quiz-stage": ["fern"], plasma: ["fern"],
+  };
+  return [...new Set([...castLayout(program, 0).map(({ name }) => name), ...scenery[program.scene]])];
+}
+
 // Handwritten 3x5 lettering stays aligned to the scene's pixel grid.
 const FONT = {
   A:"010101111101101", B:"110101110101110", C:"011100100100011",
@@ -315,7 +334,7 @@ function bricks(ctx, x, y, w, h, p, stone = false) {
   }
 }
 function sprite(ctx, name, x, y, time, p, costume = "red", flip = false) {
-  const frames = SPRITES[name];
+  const frames = p.sprites?.[name] || SPRITES[name];
   const frame = Math.floor(time * 4) % frames.length;
   const data = frames[frame];
   const colors = {
@@ -328,7 +347,7 @@ function sprite(ctx, name, x, y, time, p, costume = "red", flip = false) {
       if (color) rect(ctx, x + (flip ? data[row].length - col - 1 : col), y + row, 1, 1, color);
     }
   }
-  if (name === "cat") {
+  if (name === "cat" && !p.sprites?.cat) {
     const flick = Math.floor(time * 2) % 3;
     rect(ctx, x + 17, y + 5 - flick, 2, 5, p.ink);
     rect(ctx, x + 18, y + 4 - flick, 3, 2, p[costume]);
@@ -1007,7 +1026,10 @@ function club(ctx, program, p) {
   }
 }
 
-function drawCast(ctx, program, time, p) {
+function castLayout(program, time) {
+  const cast = [];
+  const add = (name, x, y, time, costume = "red", flip = false) =>
+    cast.push({ name, x, y, time, costume, flip });
   const options = Object.keys(ART_DIRECTIONS[program.roomId].cast);
   const index = options.indexOf(program.cast);
   const anchors = {
@@ -1024,20 +1046,28 @@ function drawCast(ctx, program, time, p) {
     : program.scene === "cosmos" || program.scene === "castle" ? "light" : "red";
   const robotLead = program.cast === "robot" && ["handheld", "cosmos"].includes(program.scene);
   if (program.scene === "forest" && index === 0) {
-    sprite(ctx, "fox", x + drift, y + 7, time, p);
+    add("fox", x + drift, y + 7, time);
   } else {
-    sprite(ctx, robotLead ? "robot" : "person", x + drift, y, frameTime, p, costume, drift < 0);
+    add(robotLead ? "robot" : "person", x + drift, y, frameTime, costume, drift < 0);
   }
   if (["friends", "sailors", "patrol", "party", "duo", "crew"].includes(program.cast)) {
-    sprite(ctx, program.cast === "crew" && program.scene === "cosmos" ? "robot" : "person", x + 28, y + 1, 0, p, "blue", true);
+    add(program.cast === "crew" && program.scene === "cosmos" ? "robot" : "person", x + 28, y + 1, 0, "blue", true);
   } else if (["courier", "robot"].includes(program.cast) && !robotLead) {
-    sprite(ctx, "robot", x + 30, y + 3, time, p);
+    add("robot", x + 30, y + 3, time);
   } else if (program.scene === "forest" || program.cast === "fox") {
-    if (program.scene !== "forest" || index !== 0) sprite(ctx, "fox", x + 33, y + 8 + Math.floor(time * 2) % 2, time, p);
+    if (program.scene !== "forest" || index !== 0) add("fox", x + 33, y + 8 + Math.floor(time * 2) % 2, time);
   } else if (["commuter", "cat", "coder", "mage"].includes(program.cast)) {
-    sprite(ctx, "cat", x + 37, y + 11, time, p, "orange");
+    add("cat", x + 37, y + 11, time, "orange");
+  }
+  return cast;
+}
+
+function drawCast(ctx, program, time, p) {
+  for (const { name, x, y, time: frameTime, costume, flip } of castLayout(program, time)) {
+    sprite(ctx, name, x, y, frameTime, p, costume, flip);
   }
   if (program.scene === "coast" && program.cast === "fisher") {
+    const [x, y] = [177, 116];
     for (let i = 0; i < 23; i++) rect(ctx, x + 12 + i, y + 8 - i / 2, 1, 1, p.brown);
     rect(ctx, x + 34, y - 3, 1, 39, p.light);
   }
@@ -1144,7 +1174,7 @@ function sceneKey(program) {
   return program.roomId + ":" + program.setting + ":" + program.atmosphere;
 }
 
-export function renderPixelScene(canvas, program, elapsed = 0) {
+export function renderPixelScene(canvas, program, elapsed = 0, sprites = null) {
   if (!validateVisualProgram(program, program?.roomId)) return;
   // Fixed logical coordinates prevent giant sprites in small thumbnails and
   // aspect-ratio-dependent layouts. CSS contains the complete scene on phones.
@@ -1153,19 +1183,20 @@ export function renderPixelScene(canvas, program, elapsed = 0) {
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) return;
   ctx.imageSmoothingEnabled = false;
-  const p = program.roomId === "kaaos" ? HANDHELD : PALETTE;
+  const p = { ...(program.roomId === "kaaos" ? HANDHELD : PALETTE), sprites };
   const key = sceneKey(program);
-  let backdrop = backgrounds.get(key);
-  if (!backdrop) {
-    backdrop = document.createElement("canvas");
+  let cached = backgrounds.get(key);
+  if (!cached || cached.sprites !== sprites) {
+    const backdrop = document.createElement("canvas");
     backdrop.width = ART_WIDTH;
     backdrop.height = ART_HEIGHT;
     drawSetting(backdrop.getContext("2d"), program, p);
     // Keep at most 24 cached 320×180 backgrounds (about 5.3 MiB of pixels).
     if (backgrounds.size >= 24) backgrounds.delete(backgrounds.keys().next().value);
-    backgrounds.set(key, backdrop);
+    cached = { canvas: backdrop, sprites };
+    backgrounds.set(key, cached);
   }
-  ctx.drawImage(backdrop, 0, 0);
+  ctx.drawImage(cached.canvas, 0, 0);
   // Quantized time gives sprite animation a deliberate twelve-frame cadence.
   const time = Math.floor(Math.max(0, elapsed) * 12) / 12;
   drawAmbientDetails(ctx, program, time, p);
