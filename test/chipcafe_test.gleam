@@ -10,6 +10,8 @@ pub fn saved_room_can_be_restored_test() {
   let assert Some(room) = chipcafe.find_room("cvgm")
 
   assert room.name == "NEON CITY"
+  assert room.station == "JEV NEON DRIVE"
+  assert room.preset == "neon-drive"
   assert chipcafe.is_saved(Some(room), room)
 }
 

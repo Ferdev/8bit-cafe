@@ -30,6 +30,12 @@ jobs:
       - name: Download dependencies
         run: gleam deps download
 
+      - name: Install browser dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Test music generator
+        run: npm test
+
       - name: Check formatting
         run: gleam format --check src test
 
@@ -40,11 +46,19 @@ jobs:
         run: gleam test
 
       - name: Build production bundle
-        run: tools/build.sh
+        run: env -u RONDAR_PREVIEW_HOSTS -u PREVIEW_URL tools/build.sh
 
       - name: Verify bundle contents
         run: |
           test -f dist/index.html
           test -f dist/chipcafe.js
           test -f dist/style.css
+          test -f dist/config.js
+          cmp -s config.js dist/config.js
           ls dist/*.gif
+
+      - name: Install browser for playback tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Test browser playback flow
+        run: npm run test:browser

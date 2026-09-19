@@ -1,23 +1,19 @@
-import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
-
-// ------------------------------------------------------------------- model
 
 pub type Room {
   Room(
     id: String,
     name: String,
     station: String,
-    station_url: String,
     description: String,
-    sources: List(#(String, String)),
-    art: String,
+    preset: String,
     accent: String,
   )
 }
@@ -28,17 +24,23 @@ pub type Screen {
   InRoom(Room)
 }
 
-pub type StreamStatus {
-  Tuning
-  Playing
-  StreamFailed
+pub type PlayerStatus {
+  Idle
+  StartingAudio
+  Composing
+  Buffering
+  PlayingJev
+  PlayingLocal
+  Recovering
+  Paused
+  PlayerFailed
 }
 
 pub type Model {
   Model(
     screen: Screen,
     playing: Bool,
-    status: StreamStatus,
+    status: PlayerStatus,
     saved_room: Option(Room),
   )
 }
@@ -59,163 +61,118 @@ fn clear_favorite() -> Nil
 @external(javascript, "./chipcafe_ffi.mjs", "trackEvent")
 fn track_event(name: String, room_id: String) -> Nil
 
+@external(erlang, "chipcafe_ffi", "start_player")
+@external(javascript, "./chipcafe_ffi.mjs", "startPlayer")
+fn start_player(room_id: String, on_status: fn(String) -> Nil) -> Nil
+
+@external(erlang, "chipcafe_ffi", "pause_player")
+@external(javascript, "./chipcafe_ffi.mjs", "pausePlayer")
+fn pause_player() -> Nil
+
+@external(erlang, "chipcafe_ffi", "stop_player")
+@external(javascript, "./chipcafe_ffi.mjs", "stopPlayer")
+fn stop_player() -> Nil
+
+@external(erlang, "chipcafe_ffi", "start_lobby_visuals")
+@external(javascript, "./chipcafe_ffi.mjs", "startLobbyVisuals")
+fn start_lobby_visuals() -> Nil
+
 fn rooms() -> List(Room) {
   [
     Room(
       id: "cvgm",
       name: "NEON CITY",
-      station: "CVGM",
-      station_url: "https://www.cvgm.net/",
-      description: "CHIPTUNE, DEMOSCENE & VIDEO GAME MUSIC",
-      sources: [
-        #("https://slacker.cvgm.net/cvgm192.ogg", "audio/ogg"),
-        #("https://slacker.cvgm.net/cvgm192", "audio/mpeg"),
-      ],
-      art: "city.gif",
+      station: "JEV NEON DRIVE",
+      description: "BRIGHT ARPEGGIOS, PULSE LEADS & MIDNIGHT BASSLINES",
+      preset: "neon-drive",
       accent: "accent-city",
     ),
     Room(
       id: "rainwave",
       name: "SUNSET BAY",
-      station: "RAINWAVE CHIPTUNE",
-      station_url: "https://rainwave.cc/chiptune/",
-      description: "THE CHIPTUNE CHANNEL OF RAINWAVE VIDEO GAME RADIO",
-      sources: [
-        #("https://relay.rainwave.cc/chiptune.ogg", "audio/ogg"),
-        #("https://relay.rainwave.cc/chiptune.mp3", "audio/mpeg"),
-      ],
-      art: "ocean.gif",
+      station: "JEV COASTAL WAVE",
+      description: "WARM CHIP CHORDS, EASY DRUMS & OCEAN-SIDE MELODIES",
+      preset: "coastal-wave",
       accent: "accent-ocean",
     ),
     Room(
       id: "nectarine",
       name: "FIREFLY WOODS",
-      station: "NECTARINE DEMOSCENE",
-      station_url: "https://scenestream.net/",
-      description: "TRACKER MODULES & SCENE MUSIC, ON AIR SINCE 2001",
-      sources: [
-        #("https://nectarine.inversi0n.org/necta192.mp3", "audio/mpeg"),
-      ],
-      art: "forest.gif",
+      station: "JEV FOREST QUEST",
+      description: "PLAYFUL QUEST THEMES, WOODLAND ARPS & SOFT PERCUSSION",
+      preset: "forest-quest",
       accent: "accent-forest",
     ),
     Room(
       id: "slay",
       name: "CASTLE PEAK",
-      station: "SLAY RADIO",
-      station_url: "https://www.slayradio.org/",
-      description: "COMMODORE 64 & AMIGA REMIXES, LIVE FROM SWEDEN",
-      sources: [
-        #("/streams/slay", "audio/mpeg"),
-        #("http://relay4.slayradio.org:8000/", "audio/mpeg"),
-      ],
-      art: "castle.gif",
+      station: "JEV BOSS MODE",
+      description: "DRIVING BASS, HEROIC LEADS & BOSS-BATTLE ENERGY",
+      preset: "boss-mode",
       accent: "accent-castle",
     ),
     Room(
       id: "kaaos",
       name: "POCKET BOY",
-      station: "KAAOSRADIO CHIPSTREAM",
-      station_url: "https://www.kaaosradio.fi/",
-      description: "FINNISH CHIPTUNES, BITPOP & TRACKER MUSIC",
-      sources: [
-        #("/streams/kaaos", "audio/mpeg"),
-        #("http://stream.kaaosradio.fi:8000/chip", "audio/mpeg"),
-      ],
-      art: "gameboy.gif",
+      station: "JEV POCKET PULSE",
+      description: "TINY SPEAKERS, BIG HOOKS & HANDHELD ADVENTURES",
+      preset: "pocket-pulse",
       accent: "accent-gb",
     ),
     Room(
       id: "kohina",
       name: "DEEP SPACE",
-      station: "KOHINA RADIO",
-      station_url: "https://kohina.com/",
-      description: "OLD SCHOOL 8-BIT GAME MUSIC, 24/7 FROM FINLAND",
-      sources: [
-        #("/streams/kohina", "audio/ogg"),
-        #("/streams/kohina-aac", "audio/aac"),
-        #("http://kohina.duckdns.org:8000/stream.ogg", "audio/ogg"),
-        #("http://kohina.duckdns.org:8000/stream.aac", "audio/aac"),
-      ],
-      art: "starfield.gif",
+      station: "JEV ORBITAL CHIP",
+      description: "SLOW ARPEGGIOS, DISTANT SIGNALS & ZERO-GROOVE BASS",
+      preset: "orbital-chip",
       accent: "accent-space",
     ),
     Room(
       id: "keygen-fm",
       name: "BYTE VAULT",
-      station: "KEYGEN-FM",
-      station_url: "https://keygen-fm.kodatek.app/",
-      description: "KEYGEN, CRACKTRO & TRACKER CHIPTUNES AROUND THE CLOCK",
-      sources: [
-        #(
-          "https://keygen-fm.kodatek.app/listen/keygen-fm/radio.mp3",
-          "audio/mpeg",
-        ),
-      ],
-      art: "keygen-vault.gif",
+      station: "JEV CRACKTRO LAB",
+      description: "FAST TRACKER RIFFS, GLITCHY FILLS & CODE-SCREEN SWAGGER",
+      preset: "cracktro-lab",
       accent: "accent-gb",
     ),
     Room(
       id: "sid-station",
       name: "SID TEMPLE",
-      station: "THE SID STATION",
-      station_url: "https://c64radio.com/",
-      description: "COMMODORE 64 SID MUSIC & SCENE CLASSICS, LIVE 24/7",
-      sources: [
-        #(
-          "https://solid24.streamupsolutions.com/proxy/icfablwz/stream",
-          "audio/mpeg",
-        ),
-      ],
-      art: "sid-studio.gif",
+      station: "JEV SID RITUAL",
+      description: "WIDE PULSE LEADS, FILTERED BASS & CEREMONIAL GROOVES",
+      preset: "sid-ritual",
       accent: "accent-castle",
     ),
     Room(
       id: "rpgn",
       name: "RPG REALM",
-      station: "RPGN RADIO",
-      station_url: "https://www.rpgamers.net/radio/",
-      description: "VIDEO GAME MUSIC FROM 8-BIT CLASSICS TO NEW RELEASES",
-      sources: [
-        #("https://listen.rpgamers.net/rpgn", "audio/mpeg"),
-      ],
-      art: "rpg-overworld.gif",
+      station: "JEV ADVENTURE LOOP",
+      description: "OVERWORLD THEMES, VICTORY HOOKS & CAMPFIRE CHORDS",
+      preset: "adventure-loop",
       accent: "accent-forest",
     ),
     Room(
       id: "radiosega",
       name: "SPEED CIRCUIT",
-      station: "RADIOSEGA",
-      station_url: "https://www.radiosega.net/",
-      description: "THE BEST SEGA MUSIC FROM EVERY GENERATION, LIVE 24/7",
-      sources: [
-        #("https://icecast.radiosega.net/rs-mpeg.mp3", "audio/mpeg"),
-      ],
-      art: "radiosega-circuit.gif",
+      station: "JEV TURBO DRIVE",
+      description: "HIGH-BPM LEADS, RACING BASS & CHECKERED-FLAG FILLS",
+      preset: "turbo-drive",
       accent: "accent-city",
     ),
     Room(
       id: "gtt-radio",
       name: "QUIZ ARENA",
-      station: "GAME THAT TUNE RADIO",
-      station_url: "https://gttradio.com/",
-      description: "24/7 VIDEO GAME MUSIC FROM MORE THAN 1,000 SOUNDTRACKS",
-      sources: [
-        #("https://icecast.gttradio.com/mp3_gtt_320k", "audio/mpeg"),
-      ],
-      art: "gtt-arena.gif",
+      station: "JEV PARTY MODE",
+      description: "BOUNCY HOOKS, SURPRISE BREAKS & CO-OP ENERGY",
+      preset: "party-mode",
       accent: "accent-ocean",
     ),
     Room(
       id: "ericade",
       name: "DEMO HALL",
-      station: "ERICADE.RADIO",
-      station_url: "https://radio.ericade.net/",
-      description: "AMIGA, TRACKER, CHIPTUNE & DEMOSCENE MUSIC, LIVE 24/7",
-      sources: [
-        #("https://radio.ericade.net/sc/stream/1/", "audio/mpeg"),
-      ],
-      art: "ericade-demoparty.gif",
+      station: "JEV TRACKER STAGE",
+      description: "DEMO-SCENE ARPS, SYNCOPATED DRUMS & MOD-STYLE MOTION",
+      preset: "tracker-stage",
       accent: "accent-space",
     ),
   ]
@@ -228,62 +185,124 @@ pub fn find_room(room_id: String) -> Option(Room) {
   }
 }
 
-fn init(_) -> Model {
-  Model(
-    screen: Boot,
-    playing: False,
-    status: Tuning,
-    saved_room: find_room(load_favorite()),
+fn init(_) -> #(Model, Effect(Msg)) {
+  #(
+    Model(
+      screen: Boot,
+      playing: False,
+      status: Idle,
+      saved_room: find_room(load_favorite()),
+    ),
+    effect.none(),
   )
 }
-
-// ------------------------------------------------------------------ update
 
 pub type Msg {
   InsertCoin
   ResumeRoom(Room)
   SelectRoom(Room)
   LeaveRoom
-  TogglePlay
+  TogglePlay(Room)
   ToggleSave(Room)
-  StreamPlaying
-  StreamBuffering
-  StreamError
+  PlayerStateChanged(String)
 }
 
-fn update(model: Model, msg: Msg) -> Model {
+fn start_player_effect(room_id: String) -> Effect(Msg) {
+  effect.from(fn(dispatch) {
+    start_player(room_id, fn(status) { dispatch(PlayerStateChanged(status)) })
+  })
+}
+
+fn pause_player_effect() -> Effect(Msg) {
+  effect.from(fn(_) { pause_player() })
+}
+
+fn stop_player_effect() -> Effect(Msg) {
+  effect.from(fn(_) { stop_player() })
+}
+
+fn start_lobby_effect() -> Effect(Msg) {
+  effect.from(fn(_) { start_lobby_visuals() })
+}
+
+fn no_effect(model: Model) -> #(Model, Effect(Msg)) {
+  #(model, effect.none())
+}
+
+fn start_room(
+  model: Model,
+  room: Room,
+  event_name: String,
+) -> #(Model, Effect(Msg)) {
+  track_event(event_name, room.id)
+  #(
+    Model(
+      screen: InRoom(room),
+      playing: True,
+      status: StartingAudio,
+      saved_room: model.saved_room,
+    ),
+    start_player_effect(room.id),
+  )
+}
+
+fn status_from_string(status: String) -> PlayerStatus {
+  case status {
+    "starting-audio" -> StartingAudio
+    "composing" -> Composing
+    "buffering" -> Buffering
+    "playing-jev" -> PlayingJev
+    "playing-local" -> PlayingLocal
+    "recovering" -> Recovering
+    "paused" -> Paused
+    "failed" -> PlayerFailed
+    _ -> PlayerFailed
+  }
+}
+
+fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    InsertCoin -> Model(..model, screen: Lobby)
-    ResumeRoom(room) -> {
-      track_event("return_listener_resume", room.id)
-      Model(..model, screen: InRoom(room), playing: True, status: Tuning)
-    }
-    SelectRoom(room) -> {
-      track_event("station_started", room.id)
-      Model(..model, screen: InRoom(room), playing: True, status: Tuning)
-    }
-    LeaveRoom -> Model(..model, screen: Lobby, playing: False, status: Tuning)
-    TogglePlay -> Model(..model, playing: !model.playing, status: Tuning)
+    InsertCoin -> #(Model(..model, screen: Lobby), start_lobby_effect())
+    ResumeRoom(room) -> start_room(model, room, "return_listener_resume")
+    SelectRoom(room) -> start_room(model, room, "station_started")
+    LeaveRoom -> #(
+      Model(..model, screen: Lobby, playing: False, status: Idle),
+      effect.batch([stop_player_effect(), start_lobby_effect()]),
+    )
+    TogglePlay(room) ->
+      case model.playing {
+        True -> #(
+          Model(..model, playing: False, status: Paused),
+          pause_player_effect(),
+        )
+        False -> #(
+          Model(..model, playing: True, status: StartingAudio),
+          start_player_effect(room.id),
+        )
+      }
     ToggleSave(room) ->
       case is_saved(model.saved_room, room) {
         True -> {
           clear_favorite()
           track_event("station_unsaved", room.id)
-          Model(..model, saved_room: None)
+          no_effect(Model(..model, saved_room: None))
         }
         False -> {
           save_favorite(room.id)
           track_event("station_saved", room.id)
-          Model(..model, saved_room: Some(room))
+          no_effect(Model(..model, saved_room: Some(room)))
         }
       }
-    StreamPlaying -> Model(..model, status: Playing)
-    StreamBuffering -> Model(..model, status: Tuning)
-    StreamError -> Model(..model, status: StreamFailed)
+    PlayerStateChanged(status) -> {
+      let decoded = status_from_string(status)
+      let is_playing = case decoded {
+        Paused | PlayerFailed -> False
+        _ -> model.playing
+      }
+      no_effect(Model(..model, playing: is_playing, status: decoded))
+    }
   }
 }
-
-// -------------------------------------------------------------------- view
 
 fn view(model: Model) -> Element(Msg) {
   case model.screen {
@@ -299,7 +318,7 @@ fn view_boot(saved_room: Option(Room)) -> Element(Msg) {
     html.div([attribute.class("boot-box")], [
       html.h1([attribute.class("logo glitch")], [element.text("8BIT.CAFE")]),
       html.p([attribute.class("tagline")], [
-        element.text("CHIPTUNE RADIO FOR STUDY, WORK & BOSS FIGHTS"),
+        element.text("GENERATIVE CHIPTUNE FOR STUDY, WORK & BOSS FIGHTS"),
       ]),
       case saved_room {
         Some(room) ->
@@ -329,7 +348,7 @@ fn view_boot(saved_room: Option(Room)) -> Element(Msg) {
           )
       },
       html.p([attribute.class("credits")], [
-        element.text("12 STATIONS · 0 COINS REQUIRED"),
+        element.text("12 GENERATIVE STAGES · 0 COINS REQUIRED"),
       ]),
     ]),
   ])
@@ -340,7 +359,7 @@ fn view_lobby(saved_room: Option(Room)) -> Element(Msg) {
     html.header([attribute.class("lobby-header")], [
       html.h1([attribute.class("logo")], [element.text("8BIT.CAFE")]),
       html.p([attribute.class("tagline")], [
-        element.text("SELECT YOUR STAGE"),
+        element.text("SELECT YOUR GENERATIVE STAGE"),
       ]),
     ]),
     case saved_room {
@@ -387,9 +406,7 @@ fn view_lobby(saved_room: Option(Room)) -> Element(Msg) {
           [element.text("FERDEV.COM")],
         ),
       ]),
-      html.p([], [
-        element.text("ALL STATIONS STREAMED BY THEIR OWNERS"),
-      ]),
+      html.p([], [element.text("ORIGINAL GENERATIVE MUSIC · GUIDED BY JEV")]),
     ]),
   ])
 }
@@ -401,10 +418,10 @@ fn view_room_card(room: Room, saved_room: Option(Room)) -> Element(Msg) {
       event.on_click(SelectRoom(room)),
     ],
     [
-      html.img([
-        attribute.src(room.art),
-        attribute.alt(room.name),
+      html.canvas([
         attribute.class("room-art"),
+        attribute.data("room-id", room.id),
+        attribute.aria_hidden(True),
       ]),
       html.div([attribute.class("room-info")], [
         html.span([attribute.class("room-name")], [element.text(room.name)]),
@@ -431,17 +448,23 @@ pub fn is_saved(saved_room: Option(Room), room: Room) -> Bool {
   }
 }
 
+fn is_live(status: PlayerStatus) -> Bool {
+  case status {
+    PlayingJev | PlayingLocal -> True
+    _ -> False
+  }
+}
+
 fn view_room(
   room: Room,
   playing: Bool,
-  status: StreamStatus,
+  status: PlayerStatus,
   saved_room: Option(Room),
 ) -> Element(Msg) {
   html.div([attribute.class("screen room " <> room.accent)], [
-    html.img([
-      attribute.src(room.art),
-      attribute.alt(room.name),
-      attribute.class("room-bg"),
+    html.canvas([
+      attribute.class("room-visual"),
+      attribute.aria_hidden(True),
     ]),
     html.div([attribute.class("room-overlay")], [
       html.header([attribute.class("room-header")], [
@@ -451,26 +474,25 @@ fn view_room(
         ),
         html.div(
           [
-            attribute.class(case playing {
+            attribute.class(case is_live(status) {
               True -> "live-badge on"
               False -> "live-badge"
             }),
           ],
-          [element.text("● LIVE")],
+          [
+            element.text(case is_live(status) {
+              True -> "● GENERATING"
+              False -> "○ STANDBY"
+            }),
+          ],
         ),
       ]),
       html.div([attribute.class("room-panel")], [
         html.h2([attribute.class("room-title")], [element.text(room.name)]),
         html.p([attribute.class("room-station-big")], [
-          html.a(
-            [
-              attribute.href(room.station_url),
-              attribute.target("_blank"),
-              attribute.rel("noopener noreferrer"),
-              attribute.class("station-link"),
-            ],
-            [element.text(room.station)],
-          ),
+          html.span([attribute.class("generator-label")], [
+            element.text(room.station),
+          ]),
         ]),
         html.p([attribute.class("room-desc")], [
           element.text(room.description),
@@ -478,7 +500,14 @@ fn view_room(
         view_status(playing, status),
         html.div([attribute.class("player-actions")], [
           html.button(
-            [attribute.class("pixel-btn play-btn"), event.on_click(TogglePlay)],
+            [
+              attribute.class("pixel-btn play-btn"),
+              attribute.aria_pressed(case playing {
+                True -> "true"
+                False -> "false"
+              }),
+              event.on_click(TogglePlay(room)),
+            ],
             [
               element.text(case playing {
                 True -> "❚❚ PAUSE"
@@ -511,64 +540,65 @@ fn view_room(
         ]),
       ]),
     ]),
-    case playing {
-      True -> view_player(room)
-      False -> element.none()
-    },
   ])
 }
 
-fn view_status(playing: Bool, status: StreamStatus) -> Element(Msg) {
-  case playing, status {
-    False, _ ->
-      html.p([attribute.class("stream-status")], [element.text("PAUSED")])
-    True, Tuning ->
-      html.p([attribute.class("stream-status blink")], [
-        element.text("TUNING IN..."),
-      ])
-    True, Playing ->
-      html.p([attribute.class("stream-status ok")], [
-        element.text("♪ NOW PLAYING ♪"),
-      ])
-    True, StreamFailed ->
-      html.p([attribute.class("stream-status error")], [
-        element.text("STREAM ERROR - TRY ANOTHER STAGE"),
-      ])
+fn is_buffering(status: PlayerStatus) -> Bool {
+  case status {
+    StartingAudio | Composing | Buffering | Recovering -> True
+    _ -> False
   }
 }
 
-fn view_player(room: Room) -> Element(Msg) {
-  let last = list.length(room.sources) - 1
-  let sources =
-    list.index_map(room.sources, fn(source, i) {
-      let #(url, mime) = source
-      case i == last {
-        // Only the last <source> firing "error" means every source failed.
-        True ->
-          html.source([
-            attribute.src(url),
-            attribute.type_(mime),
-            event.on("error", decode.success(StreamError)),
-          ])
-        False -> html.source([attribute.src(url), attribute.type_(mime)])
-      }
-    })
-  html.audio(
+fn status_text(playing: Bool, status: PlayerStatus) -> String {
+  case playing, status {
+    False, PlayerFailed -> "AUDIO UNAVAILABLE · PRESS PLAY TO RETRY"
+    False, _ -> "PAUSED"
+    True, StartingAudio -> "STARTING AUDIO..."
+    True, Composing -> "JEV IS COMPOSING..."
+    True, Buffering -> "BUFFERING THE NEXT BARS..."
+    True, Recovering -> "KEEPING THE BEAT..."
+    True, PlayingJev -> "♪ JEV GENERATING LIVE ♪"
+    True, PlayingLocal -> "♪ GENERATIVE FALLBACK ♪"
+    True, Paused -> "PAUSED"
+    True, PlayerFailed -> "AUDIO UNAVAILABLE · PRESS PLAY TO RETRY"
+    True, Idle -> "READY"
+  }
+}
+
+fn view_status(playing: Bool, status: PlayerStatus) -> Element(Msg) {
+  let buffering = is_buffering(status)
+  let status_class = case status {
+    PlayingJev | PlayingLocal -> "stream-status ok"
+    PlayerFailed -> "stream-status error"
+    _ -> "stream-status"
+  }
+  html.div(
     [
-      attribute.autoplay(True),
-      attribute.class("hidden-player"),
-      event.on("playing", decode.success(StreamPlaying)),
-      event.on("waiting", decode.success(StreamBuffering)),
-      event.on("stalled", decode.success(StreamBuffering)),
+      attribute.class(status_class),
+      attribute.role("status"),
+      attribute.aria_live("polite"),
+      attribute.aria_busy(buffering),
     ],
-    sources,
+    [
+      case buffering {
+        True ->
+          html.span(
+            [
+              attribute.class("pixel-spinner"),
+              attribute.aria_hidden(True),
+            ],
+            [],
+          )
+        False -> element.none()
+      },
+      html.span([], [element.text(status_text(playing, status))]),
+    ],
   )
 }
 
-// -------------------------------------------------------------------- main
-
 pub fn main() {
-  let app = lustre.simple(init, update, view)
+  let app = lustre.application(init, update, view)
   let assert Ok(_) = lustre.start(app, "#app", Nil)
   Nil
 }

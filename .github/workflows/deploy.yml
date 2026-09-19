@@ -25,6 +25,7 @@ jobs:
     env:
       DOCKER_BUILDKIT: 1
       KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || github.token }}
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -45,13 +46,17 @@ jobs:
           gleam --version
 
       - name: Build production bundle
-        run: gleam deps download && tools/build.sh
+        run: |
+          npm ci --ignore-scripts
+          gleam deps download
+          env -u RONDAR_PREVIEW_HOSTS -u PREVIEW_URL tools/build.sh
+          cmp -s config.js dist/config.js
 
       - name: Verify required secrets
         shell: bash
         run: |
           missing=()
-          for v in DEPLOY_HOST DEPLOY_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+          for v in DEPLOY_HOST DEPLOY_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS TYPESAFE_API_KEY; do
             if [ -z "${!v}" ]; then missing+=("$v"); fi
           done
           if [ ${#missing[@]} -ne 0 ]; then
@@ -105,6 +110,7 @@ jobs:
           umask 077
           cat > .kamal/secrets <<'SECRETS_EOF'
           KAMAL_REGISTRY_PASSWORD=$KAMAL_REGISTRY_PASSWORD
+          TYPESAFE_API_KEY=$TYPESAFE_API_KEY
           SECRETS_EOF
           sed -i 's/^[[:space:]]*//' .kamal/secrets
 

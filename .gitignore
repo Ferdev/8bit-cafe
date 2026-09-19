@@ -10,4 +10,7 @@ dist/
 #Added automatically by Lustre Dev Tools
 /.lustre
 /dist
+/node_modules
+/playwright-report
+/test-results
 config/deploy.local.yml
