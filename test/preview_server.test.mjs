@@ -51,9 +51,9 @@ test("preview server serves the bundle and relays only the Jev endpoint", async 
     const response = await fetch(`${origin}/typesafe/v1/systemone`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${syntheticKey}`,
         "content-type": "application/json",
         origin: "https://preview.example",
+        "x-chipcafe-jev-key": syntheticKey,
         "x-typesafe-sdk": "typesafe-sdk/test",
       },
       body: payload,
@@ -63,6 +63,7 @@ test("preview server serves the bundle and relays only the Jev endpoint", async 
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, "https://jev.invalid/v1/systemone");
     assert.equal(requests[0].options.headers.authorization, `Bearer ${syntheticKey}`);
+    assert.equal("x-chipcafe-jev-key" in requests[0].options.headers, false);
     assert.equal(requests[0].options.headers["x-typesafe-sdk"], "typesafe-sdk/test");
     assert.equal("origin" in requests[0].options.headers, false);
     assert.equal(requests[0].options.body.toString(), payload);

@@ -76,6 +76,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
     const request = route.request();
     requestMetadata = {
       authorizationPresent: request.headers().authorization === "Bearer test-only-browser-key",
+      relayKeyPresent: request.headers()["x-chipcafe-jev-key"] === "test-only-browser-key",
       origin: new URL(request.url()).origin,
       path: new URL(request.url()).pathname,
     };
@@ -103,6 +104,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
 
   expect(requestMetadata).toEqual({
     authorizationPresent: true,
+    relayKeyPresent: true,
     origin: "http://127.0.0.1:8123",
     path: "/typesafe/v1/systemone",
   });

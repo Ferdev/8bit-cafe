@@ -58,7 +58,6 @@ async function relayJev(request, response, upstream, fetchImpl) {
   const headers = {};
   for (const name of [
     "accept",
-    "authorization",
     "content-type",
     "x-typesafe-organization-id",
     "x-typesafe-retry-count",
@@ -67,6 +66,10 @@ async function relayJev(request, response, upstream, fetchImpl) {
   ]) {
     const value = request.headers[name];
     if (typeof value === "string") headers[name] = value;
+  }
+  const apiKey = request.headers["x-chipcafe-jev-key"];
+  if (typeof apiKey === "string" && apiKey.length > 0) {
+    headers.authorization = `Bearer ${apiKey}`;
   }
   headers["content-type"] ||= "application/json";
 

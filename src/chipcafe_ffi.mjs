@@ -261,6 +261,7 @@ function typesafeClient(config) {
   cachedClient = new TypeSafeClient({
     apiKey: config.typesafeApiKey,
     baseURL: `${window.location.origin}/typesafe`,
+    defaultHeaders: { "X-Chipcafe-Jev-Key": config.typesafeApiKey },
     defaultModel: config.typesafeModel || "jev-latest",
     dangerouslyAllowBrowser: true,
     timeout: REQUEST_TIMEOUT_MS,
