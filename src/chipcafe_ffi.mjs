@@ -755,7 +755,7 @@ function drawHandheldScene(context, width, height, time, beat, program) {
   const spriteX = width * 0.34 + Math.sin(time * program.speed * 0.7) * width * 0.18;
   const spriteY = height * 0.62 - Math.max(0, Math.sin(time * program.speed * 2.1)) * height * 0.2;
   const walkFrame = Math.floor(beat * 2) % 2;
-  drawPixelSprite(context, walkFrame ? PIXEL_SPRITES.heroB : PIXEL_SPRITES.heroA, spriteX - 10, spriteY - 17, 3, program);
+  drawPixelSprite(context, walkFrame ? PIXEL_SPRITES.handheldHeroB : PIXEL_SPRITES.handheldHeroA, spriteX - 10, spriteY - 17, 3, program);
 }
 
 function drawCosmosScene(context, width, height, time, beat, program) {
@@ -1052,6 +1052,22 @@ const PIXEL_SPRITES = Object.freeze({
     "123321",
     "122221",
     "121121",
+  ]),
+  handheldHeroA: Object.freeze([
+    " 4444 ",
+    "422224",
+    "423324",
+    "422224",
+    " 4334 ",
+    " 4  4 ",
+  ]),
+  handheldHeroB: Object.freeze([
+    " 4444 ",
+    "422224",
+    "423324",
+    "422224",
+    " 4334 ",
+    "  44  ",
   ]),
   rocket: Object.freeze([
     "   1   ",
