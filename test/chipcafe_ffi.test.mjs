@@ -37,7 +37,8 @@ test("every room produces eight bounded, playable candidates", () => {
       );
       assert.equal(Object.keys(candidate.waves).length, 8);
       assert.deepEqual(candidate.form, ["intro", "theme-a", "lift", "chorus", "finale"]);
-      assert.equal(candidate.motif.length, 8);
+      assert.equal(candidate.hook.length, 16);
+      assert.ok(candidate.melody);
       assert.equal(candidate.visual.schemaVersion, 1);
       assert.ok(candidate.visual.scene);
       assert.equal(candidate.visual.palette.length, 3);
@@ -69,9 +70,27 @@ test("candidate validation rejects malformed song structure", () => {
   invalidForm.form[2] = "arbitrary-section";
   assert.equal(validateCandidate(invalidForm), false);
 
-  const invalidMotif = structuredClone(candidate);
-  invalidMotif.motif[0] = 99;
-  assert.equal(validateCandidate(invalidMotif), false);
+  const invalidHook = structuredClone(candidate);
+  invalidHook.hook[0] = 99;
+  assert.equal(validateCandidate(invalidHook), false);
+});
+
+test("each room repeats an identifiable two-bar lead theme", () => {
+  const melodies = new Set();
+  for (const roomId of roomIds) {
+    for (const candidate of buildCandidates(roomId, 0, "opening")) {
+      melodies.add(candidate.melody);
+      const phrase = (startBeat) => candidate.events
+        .filter(({ instrument, beat }) => instrument === "lead" && beat >= startBeat && beat < startBeat + 8)
+        .map(({ beat, duration, pitch }) => ({
+          beat: Number((beat - startBeat).toFixed(3)),
+          duration,
+          pitch,
+        }));
+      assert.deepEqual(phrase(0), phrase(8), `${roomId}:${candidate.id}`);
+    }
+  }
+  assert.equal(melodies.size, roomIds.length);
 });
 
 test("candidate validation rejects unsafe visual programs", () => {

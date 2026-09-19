@@ -7,6 +7,7 @@ const REQUEST_TIMEOUT_MS = 6000;
 const BARS_PER_BLOCK = 16;
 const BEATS_PER_BAR = 4;
 const MAX_RENDER_DIMENSION = 320;
+const MAX_THUMBNAIL_DIMENSION = 160;
 const VISUAL_STYLES = Object.freeze(["grid", "waves", "particles", "orbit", "bars", "pixels"]);
 const VISUAL_SCENES = Object.freeze([
   "skyline", "coast", "forest", "castle", "handheld", "cosmos",
@@ -48,6 +49,21 @@ const MUSIC_PROFILES = Object.freeze({
   ericade: musicProfile("demo-tracker", "tracker", 0.25, 0.05, 0.84, ["sawtooth", "square", "sawtooth", "square", "triangle", "triangle", "sawtooth", "sine"]),
 });
 
+const MELODY_PROFILES = Object.freeze({
+  cvgm: melodyProfile("neon signal", [0, null, 2, 4, 5, 4, 2, null, 0, 2, 4, 7, 5, 4, 2, null], [4, null, 5, 7, 9, 7, 5, null, 4, 2, 0, 2, 4, 2, 0, null]),
+  rainwave: melodyProfile("harbor lights", [0, null, null, 2, 4, null, 2, null, 5, null, null, 4, 2, null, 0, null], [2, null, 4, null, 5, null, 7, null, 5, null, 4, 2, 0, null, null, null]),
+  nectarine: melodyProfile("firefly dance", [0, 2, null, 4, 2, 5, null, 4, 2, 0, 2, 4, null, 2, 0, null], [4, 5, null, 7, 5, 4, 2, null, 0, 2, 4, 5, 4, 2, 0, null]),
+  slay: melodyProfile("citadel call", [0, null, 0, 3, 5, null, 3, 2, 0, 3, 5, 7, 6, 5, 3, null], [5, null, 7, 8, 7, 5, 3, null, 2, 3, 5, 6, 5, 3, 2, 0]),
+  kaaos: melodyProfile("pocket hero", [0, 2, 4, 2, 5, 4, 2, null, 0, 2, 4, 7, 5, 2, 0, null], [4, 4, 5, 7, 5, 4, 2, null, 2, 0, 2, 4, 2, 0, null, null]),
+  kohina: melodyProfile("distant beacon", [0, null, null, null, 4, null, null, 2, 5, null, null, 4, 2, null, null, null], [7, null, null, 5, 4, null, null, 2, 0, null, 2, null, 4, null, null, null]),
+  "keygen-fm": melodyProfile("unlock sequence", [0, 2, 3, 5, 7, 5, 3, 2, 0, 3, 5, 8, 7, 5, 3, null], [3, 5, 7, 8, 10, 8, 7, 5, 3, 2, 0, 2, 3, 5, 7, null]),
+  "sid-station": melodyProfile("sid invocation", [0, null, 3, 2, null, 5, 3, null, 0, 2, null, 4, 5, 4, 2, null], [3, null, 5, 7, null, 5, 4, 2, 0, null, 2, 3, 5, 3, 2, null]),
+  rpgn: melodyProfile("road to dawn", [0, null, 2, 4, 5, null, 4, 2, 0, 2, 4, 7, 5, 4, 2, 0], [4, null, 5, 7, 9, null, 7, 5, 4, 5, 4, 2, 0, 2, 0, null]),
+  radiosega: melodyProfile("final lap", [0, 2, 4, 5, 7, 5, 9, 7, 5, 4, 2, 4, 5, 7, 9, null], [7, 9, 10, 9, 7, 5, 4, 2, 0, 2, 4, 5, 7, 5, 4, null]),
+  "gtt-radio": melodyProfile("bonus round", [0, 4, 2, 5, 4, null, 2, 0, 2, 5, 4, 7, 5, 4, 2, null], [4, 7, 5, 9, 7, null, 5, 4, 2, 4, 5, 7, 5, 2, 0, null]),
+  ericade: melodyProfile("demo anthem", [0, 3, 5, 3, 7, 5, 3, 2, 0, 2, 5, 7, 8, 7, 5, 3], [5, 7, 8, 10, 8, 7, 5, 3, 2, 3, 5, 7, 5, 3, 2, null]),
+});
+
 const VISUAL_PRESETS = Object.freeze({
   cvgm: visualPreset("neon skyline", "skyline", "#07051c", ["#5dfdff", "#ff4fd8", "#6b5cff"], ["grid", "bars", "particles"]),
   rainwave: visualPreset("sunset tide", "coast", "#17102f", ["#ffcc66", "#ff6b8a", "#58d7ff"], ["waves", "particles", "orbit"]),
@@ -78,6 +94,14 @@ function musicProfile(name, groove, arpRate, swing, counterDensity, waves) {
   });
 }
 
+function melodyProfile(name, phraseA, phraseB) {
+  return Object.freeze({
+    name,
+    phraseA: Object.freeze(phraseA),
+    phraseB: Object.freeze(phraseB),
+  });
+}
+
 function visualPreset(name, scene, backdrop, palette, styles) {
   return Object.freeze({
     name,
@@ -92,6 +116,8 @@ let audioContext = null;
 let masterGain = null;
 let delaySend = null;
 let activeSession = null;
+let lobbyVisualFrame = null;
+let lobbyVisualFrames = 0;
 let sessionSequence = 0;
 let cachedClient = null;
 let cachedClientKey = "";
@@ -135,6 +161,7 @@ export function startPlayer(roomId, onStatus) {
     return;
   }
 
+  stopLobbyVisuals();
   stopActiveSession(false);
 
   let context;
@@ -188,6 +215,39 @@ export function pausePlayer() {
 
 export function stopPlayer() {
   stopActiveSession(true);
+}
+
+export function startLobbyVisuals() {
+  stopLobbyVisuals();
+  lobbyVisualFrames = 0;
+  const startedAt = window.performance.now();
+  const programs = Object.fromEntries(Object.keys(PRESETS).map((roomId) => [
+    roomId,
+    generateVisualProgram(roomId, PRESETS[roomId], 0, 0),
+  ]));
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  let lastPaint = 0;
+
+  const render = (timestamp) => {
+    if (timestamp - lastPaint >= 80 || lastPaint === 0) {
+      const elapsed = Math.max(0, (timestamp - startedAt) / 1000);
+      for (const canvas of document.querySelectorAll("canvas.room-art[data-room-id]")) {
+        const roomId = canvas.dataset.roomId;
+        const program = programs[roomId];
+        if (program) renderVisualCanvas(canvas, program, elapsed, PRESETS[roomId].tempo, MAX_THUMBNAIL_DIMENSION);
+      }
+      lastPaint = timestamp;
+      lobbyVisualFrames += 1;
+    }
+    if (!reduceMotion) lobbyVisualFrame = window.requestAnimationFrame(render);
+  };
+
+  lobbyVisualFrame = window.requestAnimationFrame(render);
+}
+
+export function stopLobbyVisuals() {
+  if (lobbyVisualFrame !== null) window.cancelAnimationFrame(lobbyVisualFrame);
+  lobbyVisualFrame = null;
 }
 
 async function beginSession(session) {
@@ -264,10 +324,11 @@ async function chooseWithJev(session, candidates) {
     tempo: session.preset.tempo,
     energy: session.preset.energy,
     music_profile: MUSIC_PROFILES[session.roomId].name,
+    melody_profile: MELODY_PROFILES[session.roomId].name,
     available_voices: [...TONAL_INSTRUMENTS],
     visual_scene: VISUAL_PRESETS[session.roomId].scene,
     previous_block: session.previousSummary,
-    goal: "Choose the most coherent, interesting music-and-animation continuation without repetitive sound or motion.",
+    goal: "Preserve the stage's recognizable melody while choosing the most coherent variation in arrangement, energy, and scene motion.",
   };
 
   session.apiCalls += 1;
@@ -447,14 +508,20 @@ function startVisualRenderer(session) {
 function drawVisualFrame(session) {
   const canvas = document.querySelector("canvas.room-visual");
   if (!(canvas instanceof HTMLCanvasElement)) return;
+  const elapsed = Math.max(0, (audioContext?.currentTime || 0) - session.visualStartTime);
+  renderVisualCanvas(canvas, session.visualProgram, elapsed, session.visualTempo, MAX_RENDER_DIMENSION);
+  session.visualFrames += 1;
+}
+
+function renderVisualCanvas(canvas, program, elapsed, tempo, maxDimension) {
   const context = canvas.getContext("2d", { alpha: true });
   if (!context) return;
 
   const clientWidth = Math.max(1, canvas.clientWidth);
   const clientHeight = Math.max(1, canvas.clientHeight);
   const aspect = clientWidth / clientHeight;
-  const width = aspect >= 1 ? MAX_RENDER_DIMENSION : Math.max(1, Math.round(MAX_RENDER_DIMENSION * aspect));
-  const height = aspect >= 1 ? Math.max(1, Math.round(MAX_RENDER_DIMENSION / aspect)) : MAX_RENDER_DIMENSION;
+  const width = aspect >= 1 ? maxDimension : Math.max(1, Math.round(maxDimension * aspect));
+  const height = aspect >= 1 ? Math.max(1, Math.round(maxDimension / aspect)) : maxDimension;
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -462,9 +529,7 @@ function drawVisualFrame(session) {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.imageSmoothingEnabled = false;
 
-  const program = session.visualProgram;
-  const elapsed = Math.max(0, (audioContext?.currentTime || 0) - session.visualStartTime);
-  const beat = elapsed * session.visualTempo / 60;
+  const beat = elapsed * tempo / 60;
   const pulse = 0.82 + Math.max(0, Math.sin(beat * Math.PI * 2)) * 0.18 * program.pulse;
   context.globalAlpha = 1;
   context.fillStyle = program.backdrop;
@@ -489,7 +554,7 @@ function drawVisualFrame(session) {
   drawSceneActors(context, width, height, elapsed, beat, program);
 
   context.save();
-  context.globalAlpha = 0.08 * pulse;
+  context.globalAlpha = 0.025 * pulse;
   switch (program.style) {
     case "grid": drawGrid(context, width, height, elapsed, program); break;
     case "waves": drawWaves(context, width, height, elapsed, program); break;
@@ -500,7 +565,6 @@ function drawVisualFrame(session) {
   }
   context.restore();
   context.globalAlpha = 1;
-  session.visualFrames += 1;
 }
 
 function drawSkylineScene(context, width, height, time, beat, program) {
@@ -659,28 +723,39 @@ function drawCastleScene(context, width, height, time, beat, program) {
 }
 
 function drawHandheldScene(context, width, height, time, beat, program) {
-  const tile = Math.max(24, Math.round(Math.min(width, height) / 12));
   context.globalAlpha = 1;
   context.fillStyle = program.palette[0];
   context.fillRect(0, 0, width, height);
-  for (let y = 0; y < height; y += tile) {
-    for (let x = 0; x < width; x += tile) {
-      const index = Math.floor(x / tile) + Math.floor(y / tile) * 31;
-      context.globalAlpha = 0.2 + visualUnit(program.seed, index, 14) * 0.25;
-      context.fillStyle = program.palette[(index + program.variant) % program.palette.length];
-      context.fillRect(x + 2, y + 2, tile - 4, tile - 4);
-    }
+  context.globalAlpha = 0.26;
+  context.fillStyle = program.palette[2];
+  for (let cloud = 0; cloud < 6; cloud += 1) {
+    const cloudX = ((cloud * width / 5 - time * program.speed * 7) % (width + 50) + width + 50) % (width + 50) - 25;
+    const cloudY = 18 + cloud % 3 * 24;
+    context.fillRect(cloudX, cloudY, 21, 5);
+    context.fillRect(cloudX + 5, cloudY - 5, 12, 5);
   }
-  const spriteX = width * 0.5 + Math.sin(time * program.speed) * width * 0.24;
-  const spriteY = height * 0.52 + Math.cos(time * program.speed * 0.7) * height * 0.16;
+  context.globalAlpha = 0.4;
+  context.fillStyle = program.palette[1];
+  polygon(context, [[0, height * 0.72], [width * 0.2, height * 0.43], [width * 0.4, height * 0.72]]);
+  polygon(context, [[width * 0.3, height * 0.72], [width * 0.56, height * 0.35], [width * 0.82, height * 0.72]]);
+  polygon(context, [[width * 0.66, height * 0.72], [width * 0.88, height * 0.49], [width, height * 0.67], [width, height * 0.72]]);
   context.globalAlpha = 1;
   context.fillStyle = program.palette[2];
-  context.fillRect(Math.round(spriteX - 10), Math.round(spriteY - 14), 20, 24);
+  context.fillRect(0, height * 0.72, width, height * 0.28);
+  context.fillStyle = program.backdrop;
+  for (let x = -8; x < width; x += 12) {
+    const offset = Math.round((time * program.speed * 10) % 12);
+    context.fillRect(x - offset, height * 0.77, 6, 3);
+    context.fillRect(x - offset + 5, height * 0.91, 3, 3);
+  }
+  const pipeX = width * 0.8;
   context.fillStyle = program.palette[1];
-  context.fillRect(Math.round(spriteX - 6), Math.round(spriteY - 10), 4, 4);
-  context.fillRect(Math.round(spriteX + 2), Math.round(spriteY - 10), 4, 4);
-  context.fillRect(Math.round(spriteX - 14), Math.round(spriteY + 10 + Math.sin(beat) * 3), 10, 6);
-  context.fillRect(Math.round(spriteX + 4), Math.round(spriteY + 10 - Math.sin(beat) * 3), 10, 6);
+  context.fillRect(pipeX, height * 0.58, 28, height * 0.14);
+  context.fillRect(pipeX - 4, height * 0.55, 36, 7);
+  const spriteX = width * 0.34 + Math.sin(time * program.speed * 0.7) * width * 0.18;
+  const spriteY = height * 0.62 - Math.max(0, Math.sin(time * program.speed * 2.1)) * height * 0.2;
+  const walkFrame = Math.floor(beat * 2) % 2;
+  drawPixelSprite(context, walkFrame ? PIXEL_SPRITES.heroB : PIXEL_SPRITES.heroA, spriteX - 10, spriteY - 17, 3, program);
 }
 
 function drawCosmosScene(context, width, height, time, beat, program) {
@@ -1050,38 +1125,38 @@ function drawSceneActors(context, width, height, time, beat, program) {
   const bob = frame === 0 ? 0 : 2;
   switch (program.scene) {
     case "skyline":
-      drawPixelSprite(context, PIXEL_SPRITES.hovercar, travel, height * 0.34 + bob, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.hovercar, travel, height * 0.32 + bob, 3, program);
       break;
     case "coast":
       drawPixelSprite(context, PIXEL_SPRITES.gull, width - travel, height * 0.2 + bob * 2, 2, program);
       break;
     case "forest":
-      drawPixelSprite(context, frame ? PIXEL_SPRITES.foxB : PIXEL_SPRITES.foxA, travel, height * 0.76, 2, program);
+      drawPixelSprite(context, frame ? PIXEL_SPRITES.foxB : PIXEL_SPRITES.foxA, travel, height * 0.72, 3, program);
       break;
     case "castle":
-      drawPixelSprite(context, PIXEL_SPRITES.dragon, width - travel, height * 0.17 + Math.sin(time * 2) * 5, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.dragon, width - travel, height * 0.17 + Math.sin(time * 2) * 5, 3, program);
       drawPixelFlag(context, width * 0.5, height * 0.23, frame, program);
       break;
     case "handheld":
-      drawPixelSprite(context, PIXEL_SPRITES.ghost, width * 0.72, height * 0.3 + bob * 2, 3, program);
+      drawPixelSprite(context, PIXEL_SPRITES.ghost, width * 0.7, height * 0.28 + bob * 2, 4, program);
       break;
     case "cosmos":
-      drawPixelSprite(context, PIXEL_SPRITES.rocket, travel, height * 0.65 - Math.sin(time) * 14, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.rocket, travel, height * 0.62 - Math.sin(time) * 14, 3, program);
       break;
     case "code-tunnel":
-      drawPixelSprite(context, PIXEL_SPRITES.bot, width * 0.5 - 7, height * 0.68 + bob, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.bot, width * 0.5 - 14, height * 0.64 + bob, 4, program);
       break;
     case "chip-studio":
       drawPixelSprite(context, PIXEL_SPRITES.pulse, width * 0.5 - 7, height * 0.5 - 7, 2, program);
       break;
     case "overworld":
-      drawPixelSprite(context, frame ? PIXEL_SPRITES.heroB : PIXEL_SPRITES.heroA, width * 0.22, height * 0.67, 2, program);
+      drawPixelSprite(context, frame ? PIXEL_SPRITES.heroB : PIXEL_SPRITES.heroA, width * 0.2, height * 0.63, 3, program);
       break;
     case "turbo-road":
-      drawPixelSprite(context, PIXEL_SPRITES.rival, width * (0.34 + Math.sin(time * 0.8) * 0.12), height * 0.53 + bob, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.rival, width * (0.32 + Math.sin(time * 0.8) * 0.12), height * 0.51 + bob, 3, program);
       break;
     case "quiz-stage":
-      drawPixelSprite(context, PIXEL_SPRITES.host, width * 0.5 - 7, height * 0.34 + bob, 2, program);
+      drawPixelSprite(context, PIXEL_SPRITES.host, width * 0.5 - 11, height * 0.31 + bob, 3, program);
       break;
     case "plasma":
       drawPixelSprite(context, PIXEL_SPRITES.star, width * 0.5 - 7, height * 0.5 - 7 + bob, 3, program);
@@ -1275,12 +1350,12 @@ function scheduleTone(session, when, duration, event, block) {
   const voiceGain = {
     bass: 0.1,
     pad: 0.034,
-    arp: 0.048,
-    pulse: 0.038,
-    counter: 0.054,
-    lead: 0.066,
-    stab: 0.04,
-    texture: 0.03,
+    arp: 0.034,
+    pulse: 0.029,
+    counter: 0.043,
+    lead: 0.082,
+    stab: 0.033,
+    texture: 0.025,
   }[event.instrument] || 0.05;
   const peak = Math.max(0.004, event.velocity * voiceGain);
   oscillator.type = block.waves[event.instrument];
@@ -1292,7 +1367,7 @@ function scheduleTone(session, when, duration, event, block) {
     arp: 3400,
     pulse: 2100,
     counter: 2600,
-    lead: 3100,
+    lead: 3700,
     stab: 1800,
     texture: 4300,
   }[event.instrument] || 2600;
@@ -1392,12 +1467,11 @@ export function buildCandidates(roomId, blockIndex, previousSummary = "") {
 function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previousSummary) {
   const random = mulberry32(hashString(`${roomId}:${blockIndex}:${candidateIndex}`));
   const profile = MUSIC_PROFILES[roomId];
+  const melody = MELODY_PROFILES[roomId];
   const variation = (blockIndex + candidateIndex) % 4;
   const progression = rotate(roomPreset.progression, variation);
   const events = [];
   const totalBeats = BARS_PER_BLOCK * BEATS_PER_BAR;
-  const leadDensity = 0.34 + roomPreset.energy * 0.3 + candidateIndex * 0.012;
-  const motif = buildMotif(random, variation);
   const form = ["intro", "theme-a", "lift", "chorus", "finale"];
 
   for (let bar = 0; bar < BARS_PER_BLOCK; bar += 1) {
@@ -1412,6 +1486,7 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
     const barBeat = bar * BEATS_PER_BAR;
     const section = sectionForBar(bar);
     const sectionEnergy = [0.66, 0.86, 0.94, 1, 1.08][section];
+    const phrase = section === 2 || section === 4 ? melody.phraseB : melody.phraseA;
 
     const bassPattern = grooveBassPattern(profile.groove);
     for (const [index, offset] of bassPattern.entries()) {
@@ -1430,19 +1505,18 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
       const offset = step * profile.arpRate;
       const beat = barBeat + offset + (step % 2 === 1 ? profile.swing : 0);
       const arpPitch = chord[(step + variation) % chord.length] + (step % 4 === 3 ? 12 : 0);
-      const arpVelocity = section === 0 && step % 2 === 1 ? 0.16 : (0.22 + roomPreset.energy * 0.13) * sectionEnergy;
+      const arpVelocity = section === 0 && step % 2 === 1 ? 0.11 : (0.17 + roomPreset.energy * 0.1) * sectionEnergy;
       events.push(note("arp", beat, profile.arpRate * 0.72, arpPitch, Math.min(1, arpVelocity)));
     }
 
     for (let step = 0; step < 8; step += 1) {
-      const sparseIntro = section === 0 && ![0, 3, 4, 7].includes(step);
-      const phraseBreath = bar % 4 === 3 && step > 5 && section < 4;
-      if (sparseIntro || phraseBreath || random() > leadDensity + section * 0.08) continue;
-      const transformedStep = transformMotifStep(motif, step, section, bar);
-      const octaveLift = section >= 3 && (step === 0 || step === 4) ? 12 : 0;
-      const leadPitch = scalePitch(roomPreset, chordDegree + transformedStep, 1) + octaveLift;
-      const duration = step % 4 === 3 ? 0.72 : 0.36;
-      events.push(note("lead", barBeat + step * 0.5 + (step % 2 ? profile.swing : 0), duration, leadPitch, Math.min(1, (0.4 + roomPreset.energy * 0.17) * sectionEnergy)));
+      const phraseIndex = (bar % 2) * 8 + step;
+      const degree = phrase[phraseIndex];
+      if (degree === null) continue;
+      const octaveLift = section === 3 && variation === 2 ? 12 : 0;
+      const leadPitch = scalePitch(roomPreset, degree, 1) + octaveLift;
+      const duration = melodyNoteDuration(phrase, phraseIndex);
+      events.push(note("lead", barBeat + step * 0.5 + (step % 2 ? profile.swing : 0), duration, leadPitch, Math.min(1, (0.5 + roomPreset.energy * 0.18) * sectionEnergy)));
     }
 
     for (let beat = 0; beat < BEATS_PER_BAR; beat += 1) {
@@ -1454,7 +1528,8 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
 
     for (const offset of [1.5, 3.5]) {
       if ((section > 0 || bar === 1) && random() < profile.counterDensity + section * 0.07) {
-        const answerDegree = chordDegree + motif[(Math.round(offset * 2) + bar) % motif.length];
+        const answerIndex = (bar % 2) * 8 + Math.round(offset * 2);
+        const answerDegree = phrase[answerIndex] ?? chordDegree + 4;
         events.push(note("counter", barBeat + offset, 0.42, scalePitch(roomPreset, answerDegree, 2), Math.min(1, (0.31 + roomPreset.energy * 0.13) * sectionEnergy)));
       }
     }
@@ -1482,11 +1557,12 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
     addDrumGroove(events, barBeat, profile.groove, roomPreset.energy * sectionEnergy, bar);
   }
 
-  const contour = ["rising hooks", "falling answers", "wide leaps", "tight motifs"][variation];
+  const arrangement = ["open voicings", "syncopated support", "an octave-lifted chorus", "cadence fills"][variation];
   const visual = generateVisualProgram(roomId, roomPreset, blockIndex, candidateIndex);
   const visualName = VISUAL_PRESETS[roomId].name;
   const id = `option_${candidateIndex}`;
-  const summary = `${profile.name} ${profile.groove} arrangement with eight tonal voices, recurring motif ${motif.join("-")}, ${contour}, intro/theme/lift/chorus/finale form, extended progression ${progression.join("-")}, lead density ${leadDensity.toFixed(2)}, energy ${roomPreset.energy.toFixed(2)}; full-screen pixel-art ${visualName} ${visual.scene} scene with ${visual.style} motion at speed ${visual.speed.toFixed(2)}; varies from ${previousSummary || "the opening"}`;
+  const hookSummary = melody.phraseA.map((degree) => degree === null ? "r" : degree).join("-");
+  const summary = `${profile.name} ${profile.groove} arrangement built around the repeating ${melody.name} melody (${hookSummary}), with eight tonal voices, ${arrangement}, intro/theme/lift/chorus/finale form, extended progression ${progression.join("-")}, and energy ${roomPreset.energy.toFixed(2)}; literal animated pixel-art ${visualName} ${visual.scene} scene at speed ${visual.speed.toFixed(2)}; varies the arrangement from ${previousSummary || "the opening"} while preserving the hook`;
   return {
     schemaVersion: 1,
     id,
@@ -1495,23 +1571,14 @@ function generateCandidate(roomId, roomPreset, blockIndex, candidateIndex, previ
     tempo: roomPreset.tempo,
     totalBeats,
     profile: profile.name,
+    melody: melody.name,
     form,
-    motif,
+    hook: [...melody.phraseA],
     waves: { ...profile.waves },
     visual,
     summary,
     events: events.sort((left, right) => left.beat - right.beat),
   };
-}
-
-function buildMotif(random, variation) {
-  const motif = [0];
-  while (motif.length < 8) {
-    const movement = [-2, -1, 1, 2][Math.floor(random() * 4)];
-    motif.push(Math.max(-2, Math.min(7, motif[motif.length - 1] + movement)));
-  }
-  const rotated = rotate(motif, variation * 2);
-  return variation === 1 ? [...rotated].reverse() : rotated;
 }
 
 function sectionForBar(bar) {
@@ -1522,11 +1589,10 @@ function sectionForBar(bar) {
   return 4;
 }
 
-function transformMotifStep(motif, step, section, bar) {
-  if (section === 2) return motif[(motif.length - 1 - step + motif.length) % motif.length] + (bar % 2);
-  if (section === 3) return motif[(step + 2) % motif.length] + (step % 4 === 3 ? 2 : 0);
-  if (section === 4) return motif[(step * 2) % motif.length] + (step > 4 ? 2 : 0);
-  return motif[step % motif.length];
+function melodyNoteDuration(phrase, index) {
+  let steps = 1;
+  while (steps < 4 && phrase[index + steps] === null) steps += 1;
+  return Math.max(0.38, steps * 0.5 - 0.08);
 }
 
 function grooveStabPattern(groove, bar) {
@@ -1628,11 +1694,13 @@ export function validateCandidate(candidate) {
   if (candidate.totalBeats !== BARS_PER_BLOCK * BEATS_PER_BAR) return false;
   const profile = MUSIC_PROFILES[candidate.roomId];
   if (candidate.profile !== profile.name || !validateWaves(candidate.waves)) return false;
+  const melody = MELODY_PROFILES[candidate.roomId];
+  if (candidate.melody !== melody.name) return false;
   if (!Array.isArray(candidate.form)
     || candidate.form.join(",") !== "intro,theme-a,lift,chorus,finale") return false;
-  if (!Array.isArray(candidate.motif)
-    || candidate.motif.length !== 8
-    || !candidate.motif.every((degree) => Number.isInteger(degree) && degree >= -2 && degree <= 9)) return false;
+  if (!Array.isArray(candidate.hook)
+    || candidate.hook.length !== melody.phraseA.length
+    || !candidate.hook.every((degree, index) => degree === melody.phraseA[index])) return false;
   if (!validateVisualProgram(candidate.visual, candidate.roomId)) return false;
   if (!Array.isArray(candidate.events) || candidate.events.length > 1100) return false;
   return candidate.events.every((event) => {
@@ -1717,10 +1785,12 @@ export function playerDebugState() {
     provenance: activeSession?.provenance || null,
     contextState: audioContext?.state || "unavailable",
     musicProfile: activeSession ? MUSIC_PROFILES[activeSession.roomId].name : null,
+    melodyProfile: activeSession ? MELODY_PROFILES[activeSession.roomId].name : null,
     tonalVoices: activeSession ? TONAL_INSTRUMENTS.length : 0,
     visualScene: activeSession?.visualProgram.scene || null,
     visualStyle: activeSession?.visualProgram.style || null,
     visualFrames: activeSession?.visualFrames || 0,
+    lobbyVisualFrames,
   };
 }
 

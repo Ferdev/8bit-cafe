@@ -13,6 +13,13 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   await page.goto("/");
   await page.getByRole("button", { name: /insert coin/i }).click();
   await expect(page.locator(".room-card")).toHaveCount(12);
+  await expect(page.locator("canvas.room-art")).toHaveCount(12);
+  await expect(page.locator("img.room-art")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().lobbyVisualFrames)).toBeGreaterThan(0);
+  const thumbnailWidths = await page.locator("canvas.room-art").evaluateAll((canvases) => canvases.map(({ width }) => width));
+  expect(thumbnailWidths.every((width) => width === 160)).toBe(true);
+  expect(await page.evaluate(() => performance.getEntriesByType("resource")
+    .filter(({ name }) => name.endsWith(".gif")).length)).toBe(0);
 
   await page.locator(".room-card").first().click();
   await expect(page.getByRole("status")).toContainText(/COMPOSING|BUFFERING/);
@@ -24,6 +31,7 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.queuedSeconds).toBeGreaterThan(12);
   expect(playing.provenance).toBe("jev");
   expect(playing.musicProfile).toBe("night-drive");
+  expect(playing.melodyProfile).toBe("neon signal");
   expect(playing.tonalVoices).toBe(8);
   expect(playing.visualScene).toBe("skyline");
   expect(playing.visualStyle).toBe("bars");
@@ -49,6 +57,7 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   await page.getByRole("button", { name: /lobby/i }).click();
   await expect(page.locator(".room-card")).toHaveCount(12);
   await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().active)).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().lobbyVisualFrames)).toBeGreaterThan(0);
 });
 
 test("falls back locally when Jev is not configured", async ({ page }) => {
@@ -93,6 +102,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
       origin: new URL(request.url()).origin,
       path: new URL(request.url()).pathname,
       musicProfile: payload.state.music_profile,
+      melodyProfile: payload.state.melody_profile,
       tonalVoices: payload.state.available_voices.length,
       visualScene: payload.state.visual_scene,
     };
@@ -124,6 +134,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
     origin: "http://127.0.0.1:8123",
     path: "/typesafe/v1/systemone",
     musicProfile: "night-drive",
+    melodyProfile: "neon signal",
     tonalVoices: 8,
     visualScene: "skyline",
   });

@@ -14,7 +14,6 @@ pub type Room {
     station: String,
     description: String,
     preset: String,
-    art: String,
     accent: String,
   )
 }
@@ -74,6 +73,10 @@ fn pause_player() -> Nil
 @external(javascript, "./chipcafe_ffi.mjs", "stopPlayer")
 fn stop_player() -> Nil
 
+@external(erlang, "chipcafe_ffi", "start_lobby_visuals")
+@external(javascript, "./chipcafe_ffi.mjs", "startLobbyVisuals")
+fn start_lobby_visuals() -> Nil
+
 fn rooms() -> List(Room) {
   [
     Room(
@@ -82,7 +85,6 @@ fn rooms() -> List(Room) {
       station: "JEV NEON DRIVE",
       description: "BRIGHT ARPEGGIOS, PULSE LEADS & MIDNIGHT BASSLINES",
       preset: "neon-drive",
-      art: "city.gif",
       accent: "accent-city",
     ),
     Room(
@@ -91,7 +93,6 @@ fn rooms() -> List(Room) {
       station: "JEV COASTAL WAVE",
       description: "WARM CHIP CHORDS, EASY DRUMS & OCEAN-SIDE MELODIES",
       preset: "coastal-wave",
-      art: "ocean.gif",
       accent: "accent-ocean",
     ),
     Room(
@@ -100,7 +101,6 @@ fn rooms() -> List(Room) {
       station: "JEV FOREST QUEST",
       description: "PLAYFUL QUEST THEMES, WOODLAND ARPS & SOFT PERCUSSION",
       preset: "forest-quest",
-      art: "forest.gif",
       accent: "accent-forest",
     ),
     Room(
@@ -109,7 +109,6 @@ fn rooms() -> List(Room) {
       station: "JEV BOSS MODE",
       description: "DRIVING BASS, HEROIC LEADS & BOSS-BATTLE ENERGY",
       preset: "boss-mode",
-      art: "castle.gif",
       accent: "accent-castle",
     ),
     Room(
@@ -118,7 +117,6 @@ fn rooms() -> List(Room) {
       station: "JEV POCKET PULSE",
       description: "TINY SPEAKERS, BIG HOOKS & HANDHELD ADVENTURES",
       preset: "pocket-pulse",
-      art: "gameboy.gif",
       accent: "accent-gb",
     ),
     Room(
@@ -127,7 +125,6 @@ fn rooms() -> List(Room) {
       station: "JEV ORBITAL CHIP",
       description: "SLOW ARPEGGIOS, DISTANT SIGNALS & ZERO-GROOVE BASS",
       preset: "orbital-chip",
-      art: "starfield.gif",
       accent: "accent-space",
     ),
     Room(
@@ -136,7 +133,6 @@ fn rooms() -> List(Room) {
       station: "JEV CRACKTRO LAB",
       description: "FAST TRACKER RIFFS, GLITCHY FILLS & CODE-SCREEN SWAGGER",
       preset: "cracktro-lab",
-      art: "keygen-vault.gif",
       accent: "accent-gb",
     ),
     Room(
@@ -145,7 +141,6 @@ fn rooms() -> List(Room) {
       station: "JEV SID RITUAL",
       description: "WIDE PULSE LEADS, FILTERED BASS & CEREMONIAL GROOVES",
       preset: "sid-ritual",
-      art: "sid-studio.gif",
       accent: "accent-castle",
     ),
     Room(
@@ -154,7 +149,6 @@ fn rooms() -> List(Room) {
       station: "JEV ADVENTURE LOOP",
       description: "OVERWORLD THEMES, VICTORY HOOKS & CAMPFIRE CHORDS",
       preset: "adventure-loop",
-      art: "rpg-overworld.gif",
       accent: "accent-forest",
     ),
     Room(
@@ -163,7 +157,6 @@ fn rooms() -> List(Room) {
       station: "JEV TURBO DRIVE",
       description: "HIGH-BPM LEADS, RACING BASS & CHECKERED-FLAG FILLS",
       preset: "turbo-drive",
-      art: "radiosega-circuit.gif",
       accent: "accent-city",
     ),
     Room(
@@ -172,7 +165,6 @@ fn rooms() -> List(Room) {
       station: "JEV PARTY MODE",
       description: "BOUNCY HOOKS, SURPRISE BREAKS & CO-OP ENERGY",
       preset: "party-mode",
-      art: "gtt-arena.gif",
       accent: "accent-ocean",
     ),
     Room(
@@ -181,7 +173,6 @@ fn rooms() -> List(Room) {
       station: "JEV TRACKER STAGE",
       description: "DEMO-SCENE ARPS, SYNCOPATED DRUMS & MOD-STYLE MOTION",
       preset: "tracker-stage",
-      art: "ericade-demoparty.gif",
       accent: "accent-space",
     ),
   ]
@@ -230,6 +221,10 @@ fn stop_player_effect() -> Effect(Msg) {
   effect.from(fn(_) { stop_player() })
 }
 
+fn start_lobby_effect() -> Effect(Msg) {
+  effect.from(fn(_) { start_lobby_visuals() })
+}
+
 fn no_effect(model: Model) -> #(Model, Effect(Msg)) {
   #(model, effect.none())
 }
@@ -267,12 +262,12 @@ fn status_from_string(status: String) -> PlayerStatus {
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    InsertCoin -> no_effect(Model(..model, screen: Lobby))
+    InsertCoin -> #(Model(..model, screen: Lobby), start_lobby_effect())
     ResumeRoom(room) -> start_room(model, room, "return_listener_resume")
     SelectRoom(room) -> start_room(model, room, "station_started")
     LeaveRoom -> #(
       Model(..model, screen: Lobby, playing: False, status: Idle),
-      stop_player_effect(),
+      effect.batch([stop_player_effect(), start_lobby_effect()]),
     )
     TogglePlay(room) ->
       case model.playing {
@@ -423,10 +418,10 @@ fn view_room_card(room: Room, saved_room: Option(Room)) -> Element(Msg) {
       event.on_click(SelectRoom(room)),
     ],
     [
-      html.img([
-        attribute.src(room.art),
-        attribute.alt(room.name),
+      html.canvas([
         attribute.class("room-art"),
+        attribute.data("room-id", room.id),
+        attribute.aria_hidden(True),
       ]),
       html.div([attribute.class("room-info")], [
         html.span([attribute.class("room-name")], [element.text(room.name)]),

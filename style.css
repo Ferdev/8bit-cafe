@@ -309,8 +309,12 @@ img {
 .room-art {
   display: block;
   width: 100%;
+  height: auto;
   aspect-ratio: 16 / 9;
   object-fit: cover;
+  background: var(--void);
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
   border-bottom: 4px solid var(--ink);
 }
 

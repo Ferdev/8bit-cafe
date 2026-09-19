@@ -6,13 +6,17 @@ AI's Jev model to choose the next continuation, and synthesizes the result with
 the Web Audio API. Candidates follow an evolving intro/theme/lift/chorus/finale
 form and layer eight tonal voices (lead, counter-melody, arpeggio, pulse, pad,
 bass, chord stabs, and texture) over channel-specific drum and groove rules.
-Recurring motifs are transformed between sections, while layered oscillators,
+Recurring themes return between sections, while layered oscillators,
 per-voice filters, and a short chip delay give the voices more depth.
+Each stage has its own original two-part melody. The arrangement repeats that
+theme clearly across the block while Jev varies the surrounding harmony,
+orchestration, intensity, and scene treatment.
 Every candidate also contains a bounded procedural scene program, so the same
 Jev decision directs the room's full-screen canvas animation in sync with the
 selected musical block. The scenes render as animated 320-pixel-wide pixel-art
-vignettes with room-specific environments and sprites. They replace the former
-GIF room backgrounds; GIFs remain only as lobby thumbnails.
+vignettes with room-specific environments and sprites. The lobby renders the
+same scene system in lightweight animated canvases, so the thumbnail is a true
+preview of the room. The former GIFs are no longer displayed.
 
 The app remains a static Gleam/Lustre site. It has no application backend. When
 a stage starts, the UI shows the current `STARTING AUDIO`, `COMPOSING`, and
