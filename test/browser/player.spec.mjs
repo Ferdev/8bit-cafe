@@ -24,11 +24,19 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.queuedSeconds).toBeGreaterThan(12);
   expect(playing.provenance).toBe("jev");
   expect(playing.musicProfile).toBe("night-drive");
-  expect(playing.tonalVoices).toBe(6);
+  expect(playing.tonalVoices).toBe(8);
   expect(playing.visualScene).toBe("skyline");
   expect(playing.visualStyle).toBe("bars");
   expect(playing.visualFrames).toBeGreaterThan(0);
   await expect(page.locator("canvas.room-visual")).toHaveCount(1);
+  const canvasPixels = await page.locator("canvas.room-visual").evaluate((canvas) => ({
+    width: canvas.width,
+    height: canvas.height,
+    imageRendering: getComputedStyle(canvas).imageRendering,
+  }));
+  expect(canvasPixels.width).toBe(320);
+  expect(canvasPixels.height).toBeLessThanOrEqual(320);
+  expect(canvasPixels.imageRendering).toBe("pixelated");
   await expect(page.locator("img.room-bg")).toHaveCount(0);
 
   await page.getByRole("button", { name: /pause/i }).click();
@@ -116,7 +124,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
     origin: "http://127.0.0.1:8123",
     path: "/typesafe/v1/systemone",
     musicProfile: "night-drive",
-    tonalVoices: 6,
+    tonalVoices: 8,
     visualScene: "skyline",
   });
   const state = await page.evaluate(() => window.__chipcafePlayerDebug());

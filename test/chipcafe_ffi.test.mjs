@@ -33,9 +33,11 @@ test("every room produces eight bounded, playable candidates", () => {
       assert.ok(candidate.events.length > 350);
       assert.deepEqual(
         new Set(candidate.events.map(({ instrument }) => instrument)),
-        new Set(["lead", "counter", "arp", "pulse", "pad", "bass", "kick", "snare", "hat"]),
+        new Set(["lead", "counter", "arp", "pulse", "pad", "bass", "stab", "texture", "kick", "snare", "hat"]),
       );
-      assert.equal(Object.keys(candidate.waves).length, 6);
+      assert.equal(Object.keys(candidate.waves).length, 8);
+      assert.deepEqual(candidate.form, ["intro", "theme-a", "lift", "chorus", "finale"]);
+      assert.equal(candidate.motif.length, 8);
       assert.equal(candidate.visual.schemaVersion, 1);
       assert.ok(candidate.visual.scene);
       assert.equal(candidate.visual.palette.length, 3);
@@ -59,6 +61,17 @@ test("candidate validation rejects unsafe event data", () => {
   const invalid = structuredClone(candidate);
   invalid.events[0].velocity = 9;
   assert.equal(validateCandidate(invalid), false);
+});
+
+test("candidate validation rejects malformed song structure", () => {
+  const [candidate] = buildCandidates("cvgm", 0, "opening");
+  const invalidForm = structuredClone(candidate);
+  invalidForm.form[2] = "arbitrary-section";
+  assert.equal(validateCandidate(invalidForm), false);
+
+  const invalidMotif = structuredClone(candidate);
+  invalidMotif.motif[0] = 99;
+  assert.equal(validateCandidate(invalidMotif), false);
 });
 
 test("candidate validation rejects unsafe visual programs", () => {
