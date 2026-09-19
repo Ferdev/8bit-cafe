@@ -23,7 +23,7 @@ gleam deps download
 gleam test
 npm test
 tools/build.sh
-python3 -m http.server -d dist 8000
+node tools/preview-server.mjs dist 8000
 ```
 
 `config.js` contains empty local defaults. To exercise Jev locally, set a
@@ -40,8 +40,10 @@ window.CHIPCAFE_CONFIG = {
 TypeSafe's SDK requires `dangerouslyAllowBrowser: true` for this architecture.
 That name is intentional: any credential sent to a public browser can be viewed
 and reused by a visitor. Production must use a restricted/revocable browser key
-with an explicit spend limit, and TypeSafe must allow requests from the site
-origin. Never commit a key or store it in localStorage.
+with an explicit spend limit. The local server and production nginx relay only
+the fixed `/typesafe/v1/systemone` path because TypeSafe currently rejects
+cross-origin browser requests; candidate generation and SDK response handling
+remain in the browser. Never commit a key or store it in localStorage.
 
 ## Production configuration
 

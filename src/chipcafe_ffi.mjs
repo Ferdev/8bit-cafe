@@ -260,6 +260,7 @@ function typesafeClient(config) {
   if (cachedClient && cachedClientKey === cacheKey) return cachedClient;
   cachedClient = new TypeSafeClient({
     apiKey: config.typesafeApiKey,
+    baseURL: `${window.location.origin}/typesafe`,
     defaultModel: config.typesafeModel || "jev-latest",
     dangerouslyAllowBrowser: true,
     timeout: REQUEST_TIMEOUT_MS,

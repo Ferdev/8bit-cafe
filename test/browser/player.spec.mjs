@@ -55,3 +55,58 @@ test("falls back locally when Jev is not configured", async ({ page }) => {
   expect(state.visualStyle).toBeTruthy();
   expect(state.visualFrames).toBeGreaterThan(0);
 });
+
+test("sends the SDK request through the same-origin Jev relay", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__chipcafeJevDecide", {
+      value: undefined,
+      writable: false,
+    });
+  });
+  await page.route("**/config.js", (route) => route.fulfill({
+    contentType: "text/javascript",
+    body: `window.CHIPCAFE_CONFIG = Object.freeze({
+      typesafeApiKey: "test-only-browser-key",
+      typesafeModel: "jev-test",
+    });`,
+  }));
+
+  let requestMetadata = null;
+  await page.route("**/typesafe/v1/systemone", async (route) => {
+    const request = route.request();
+    requestMetadata = {
+      authorizationPresent: request.headers().authorization === "Bearer test-only-browser-key",
+      origin: new URL(request.url()).origin,
+      path: new URL(request.url()).pathname,
+    };
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        answers: {
+          continuation: {
+            type: "choice",
+            choice: "option_1",
+            probabilities: { option_1: 1 },
+            confidence: 1,
+          },
+        },
+        model: "jev-test",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  await page.locator(".room-card").first().click();
+  await expect(page.getByRole("status")).toContainText("JEV GENERATING LIVE");
+
+  expect(requestMetadata).toEqual({
+    authorizationPresent: true,
+    origin: "http://127.0.0.1:8123",
+    path: "/typesafe/v1/systemone",
+  });
+  const state = await page.evaluate(() => window.__chipcafePlayerDebug());
+  expect(state.provenance).toBe("jev");
+  expect(state.visualStyle).toBe("bars");
+});
