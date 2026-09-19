@@ -1,0 +1,10 @@
+.git
+.github
+.rondar
+.env*
+.kamal
+build
+dist
+node_modules
+playwright-report
+test-results
