@@ -48,5 +48,9 @@ The nginx container writes public `config.js` at startup from:
 - `TYPESAFE_API_KEY` — restricted TypeSafe browser credential
 - `TYPESAFE_MODEL` — optional model alias; defaults to `jev-latest`
 
-Kamal injects the key as a runtime secret. CI and unit tests use pure candidate
-generation and mocked decisions; they do not call TypeSafe.
+Kamal injects the key as a runtime secret. Rondar previews generate the same
+public configuration after the bundle is built, using the preview runtime's
+`RONDAR_PREVIEW_HOSTS` signal. Ordinary builds and CI retain the checked-in
+empty placeholder even if their environment can access the key. CI and unit
+tests use synthetic configuration and mocked decisions; they do not call
+TypeSafe.

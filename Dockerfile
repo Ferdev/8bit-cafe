@@ -20,5 +20,6 @@ RUN gleam run -m lustre/dev build chipcafe \
 FROM nginx:1.29-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html/
+COPY tools/write-browser-config.sh /usr/local/lib/chipcafe/write-browser-config.sh
 COPY docker-entrypoint.d/40-chipcafe-config.sh /docker-entrypoint.d/40-chipcafe-config.sh
 EXPOSE 80

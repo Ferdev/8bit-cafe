@@ -46,7 +46,11 @@ jobs:
           gleam --version
 
       - name: Build production bundle
-        run: npm ci --ignore-scripts && gleam deps download && tools/build.sh
+        run: |
+          npm ci --ignore-scripts
+          gleam deps download
+          env -u RONDAR_PREVIEW_HOSTS -u PREVIEW_URL tools/build.sh
+          cmp -s config.js dist/config.js
 
       - name: Verify required secrets
         shell: bash

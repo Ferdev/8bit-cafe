@@ -46,7 +46,7 @@ jobs:
         run: gleam test
 
       - name: Build production bundle
-        run: tools/build.sh
+        run: env -u RONDAR_PREVIEW_HOSTS -u PREVIEW_URL tools/build.sh
 
       - name: Verify bundle contents
         run: |
@@ -54,6 +54,7 @@ jobs:
           test -f dist/chipcafe.js
           test -f dist/style.css
           test -f dist/config.js
+          cmp -s config.js dist/config.js
           ls dist/*.gif
 
       - name: Install browser for playback tests
