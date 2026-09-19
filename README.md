@@ -12,13 +12,22 @@ Each stage has its own original two-part melody and rhythmic grid, from broad
 one-beat themes to rapid quarter-beat tracker lines. The arrangement repeats
 that theme clearly across the block while Jev varies the surrounding harmony,
 orchestration, intensity, and scene treatment.
-Every candidate also contains a bounded procedural scene program, so the same
-Jev decision directs the room's browser-rendered full-screen canvas animation
-in sync with the selected musical block. Jev selects typed scene parameters; it
-does not return image pixels. The scenes render as animated 320-pixel-wide
-pixel-art vignettes with room-specific environments and sprites. The lobby
-renders the same scene system in lightweight animated canvases, so the thumbnail
-is a true preview of the room. The former GIFs are no longer displayed.
+Jev also composes the artwork from an original sprite and tile library. The
+same request includes three independent typed choices: setting, cast, and
+atmosphere. Each room has three settings, three casts, and three atmospheres
+(27 combinations), including cafes, cottages, a harbor, a studio and an arcade.
+Characters, tiled roofs, brickwork, shop signs, furniture and plants are drawn
+on a fixed 320×180 pixel canvas with a sixteen-colour palette (four colours in
+Pocket pulse). Character frames, water, rain, equipment and other small details
+animate at twelve frames per second; reduced-motion mode shows a still frame.
+Jev chooses the composition; the authored library supplies the pixels.
+
+The lobby uses the same renderer and remembers the latest selected composition
+for each room during the page visit. Before a room has played, its thumbnail
+shows a local default without making an API call. Scene backgrounds are cached
+by room, setting and atmosphere, with a limit of 24 cached backgrounds. The full
+scene keeps its proportions and sits above the controls on narrow screens.
+No image-generation service or additional credential is required.
 
 The app remains a static Gleam/Lustre site. It has no application backend. When
 a stage starts, the UI shows the current `STARTING AUDIO`, `COMPOSING`, and

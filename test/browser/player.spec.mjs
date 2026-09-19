@@ -11,9 +11,14 @@ test.beforeEach(async ({ page }) => {
         return originalCreateDelay.apply(this, args);
       };
     }
-    window.__chipcafeJevDecide = async ({ criteria }) => {
+    window.__chipcafeJevDecide = async ({ criteria, visualCriteria }) => {
       await new Promise((resolve) => setTimeout(resolve, 350));
-      return Object.keys(criteria)[1];
+      return {
+        continuation: Object.keys(criteria)[1],
+        setting: Object.keys(visualCriteria.setting)[2],
+        cast: Object.keys(visualCriteria.cast)[1],
+        atmosphere: Object.keys(visualCriteria.atmosphere)[0],
+      };
     };
   });
 });
@@ -26,7 +31,7 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   await expect(page.locator("img.room-art")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().lobbyVisualFrames)).toBeGreaterThan(0);
   const thumbnailWidths = await page.locator("canvas.room-art").evaluateAll((canvases) => canvases.map(({ width }) => width));
-  expect(thumbnailWidths.every((width) => width === 160)).toBe(true);
+  expect(thumbnailWidths.every((width) => width === 320)).toBe(true);
   expect(await page.evaluate(() => performance.getEntriesByType("resource")
     .filter(({ name }) => name.endsWith(".gif")).length)).toBe(0);
 
@@ -43,7 +48,10 @@ test("buffers Jev music, plays, pauses, resumes, and stops on exit", async ({ pa
   expect(playing.melodyProfile).toBe("neon signal");
   expect(playing.tonalVoices).toBe(8);
   expect(playing.visualScene).toBe("skyline");
-  expect(playing.visualStyle).toBe("bars");
+  expect(playing.visualSetting).toBe("bookshop");
+  expect(playing.visualCast).toBe("friends");
+  expect(playing.visualAtmosphere).toBe("rain");
+  expect(playing.visualProvenance).toBe("jev");
   expect(playing.visualFrames).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.__chipcafeDelayNodes)).toBe(0);
   await expect(page.locator("canvas.room-visual")).toHaveCount(1);
@@ -83,7 +91,8 @@ test("falls back locally when Jev is not configured", async ({ page }) => {
   expect(state.active).toBe(true);
   expect(state.roomId).toBe("rainwave");
   expect(state.queuedSeconds).toBeGreaterThan(12);
-  expect(state.visualStyle).toBeTruthy();
+  expect(state.visualSetting).toBeTruthy();
+  expect(state.visualProvenance).toBe("local");
   expect(state.visualFrames).toBeGreaterThan(0);
 });
 
@@ -115,6 +124,7 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
       melodyProfile: payload.state.melody_profile,
       tonalVoices: payload.state.available_voices.length,
       visualScene: payload.state.visual_scene,
+      artQuestions: Object.keys(payload.questions).filter((key) => key !== "continuation").sort(),
     };
     await route.fulfill({
       contentType: "application/json",
@@ -126,6 +136,9 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
             probabilities: { option_1: 1 },
             confidence: 1,
           },
+          setting: { type: "choice", choice: "records", confidence: 1, probabilities: { records: 1 } },
+          cast: { type: "choice", choice: "courier", confidence: 1, probabilities: { courier: 1 } },
+          atmosphere: { type: "choice", choice: "mist", confidence: 1, probabilities: { mist: 1 } },
         },
         model: "jev-test",
         usage: { input_tokens: 1, output_tokens: 1 },
@@ -147,8 +160,70 @@ test("sends the SDK request through the same-origin Jev relay", async ({ page })
     melodyProfile: "neon signal",
     tonalVoices: 8,
     visualScene: "skyline",
+    artQuestions: ["atmosphere", "cast", "setting"],
   });
   const state = await page.evaluate(() => window.__chipcafePlayerDebug());
   expect(state.provenance).toBe("jev");
-  expect(state.visualStyle).toBe("bars");
+  expect(state.visualSetting).toBe("records");
+  expect(state.visualCast).toBe("courier");
+  expect(state.visualAtmosphere).toBe("mist");
+  expect(state.visualProvenance).toBe("jev");
+});
+
+test("all sprite settings render distinct art and the lobby remembers Jev's composition", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    window.__artVariant = 0;
+    window.__chipcafeJevDecide = async ({ criteria, visualCriteria }) => ({
+      continuation: Object.keys(criteria)[0],
+      ...Object.fromEntries(Object.entries(visualCriteria).map(([key, options]) => [
+        key, Object.keys(options)[window.__artVariant],
+      ])),
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  const scenes = new Set();
+  for (let room = 0; room < 12; room++) {
+    for (let variant = 0; variant < 3; variant++) {
+      await page.evaluate((value) => { window.__artVariant = value; }, variant);
+      await page.locator(".room-card").nth(room).click();
+      await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().visualProvenance)).toBe("jev");
+      const art = await page.locator("canvas.room-visual").evaluate((canvas) => {
+        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        const colours = new Set();
+        for (let index = 0; index < pixels.length; index += 4) {
+          colours.add(pixels[index] * 65536 + pixels[index + 1] * 256 + pixels[index + 2]);
+        }
+        return { pixels: canvas.toDataURL(), colourCount: colours.size };
+      });
+      const { pixels } = art;
+      const roomId = await page.evaluate(() => window.__chipcafePlayerDebug().roomId);
+      expect(art.colourCount).toBeGreaterThan(3);
+      expect(art.colourCount).toBeLessThanOrEqual(roomId === "kaaos" ? 4 : 16);
+      expect(scenes.has(pixels)).toBe(false);
+      scenes.add(pixels);
+      await page.getByRole("button", { name: /lobby/i }).click();
+      await expect.poll(() => page.locator("canvas.room-art").nth(room).evaluate((canvas) => canvas.toDataURL())).toBe(pixels);
+    }
+  }
+  expect(scenes.size).toBe(36);
+});
+
+test("sprite animation changes frames and retains proportions on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: /insert coin/i }).click();
+  await page.locator(".room-card").first().click();
+  await expect.poll(() => page.evaluate(() => window.__chipcafePlayerDebug().visualProvenance)).toBe("jev");
+  const canvas = page.locator("canvas.room-visual");
+  const firstFrame = await canvas.evaluate((element) => element.toDataURL());
+  await expect.poll(() => canvas.evaluate((element) => element.toDataURL())).not.toBe(firstFrame);
+  expect(await canvas.evaluate((element) => ({
+    width: element.width, height: element.height, fit: getComputedStyle(element).objectFit,
+  }))).toEqual({ width: 320, height: 180, fit: "contain" });
+  const sceneBounds = await canvas.boundingBox();
+  const controlsBounds = await page.locator(".room-panel").boundingBox();
+  expect(sceneBounds.y + sceneBounds.height).toBeLessThanOrEqual(controlsBounds.y);
 });

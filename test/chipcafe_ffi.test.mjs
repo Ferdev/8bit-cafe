@@ -6,6 +6,9 @@ import {
   selectLocalCandidate,
   validateCandidate,
 } from "../src/chipcafe_ffi.mjs";
+import {
+  composeVisualProgram, createVisualProgram, visualChoiceCriteria,
+} from "../src/chipcafe_art.mjs";
 
 const roomIds = [
   "cvgm",
@@ -40,10 +43,11 @@ test("every room produces eight bounded, playable candidates", () => {
       assert.equal(candidate.hook.length, 8 / candidate.melodyStep);
       assert.ok([0.25, 0.5, 1].includes(candidate.melodyStep));
       assert.ok(candidate.melody);
-      assert.equal(candidate.visual.schemaVersion, 1);
+      assert.equal(candidate.visual.schemaVersion, 2);
       assert.ok(candidate.visual.scene);
-      assert.equal(candidate.visual.palette.length, 3);
-      assert.ok(candidate.visual.density >= 8);
+      assert.ok(candidate.visual.setting);
+      assert.ok(candidate.visual.cast);
+      assert.ok(candidate.visual.atmosphere);
     }
   }
 });
@@ -106,13 +110,11 @@ test("each room repeats an identifiable two-bar lead theme", () => {
 
 test("candidate validation rejects unsafe visual programs", () => {
   const [candidate] = buildCandidates("cvgm", 0, "opening");
-  const invalidStyle = structuredClone(candidate);
-  invalidStyle.visual.style = "arbitrary-script";
-  assert.equal(validateCandidate(invalidStyle), false);
-
-  const invalidPalette = structuredClone(candidate);
-  invalidPalette.visual.palette[0] = "url(javascript:bad)";
-  assert.equal(validateCandidate(invalidPalette), false);
+  for (const key of ["setting", "cast", "atmosphere"]) {
+    const invalid = structuredClone(candidate);
+    invalid.visual[key] = "arbitrary-script";
+    assert.equal(validateCandidate(invalid), false);
+  }
 
   const invalidScene = structuredClone(candidate);
   invalidScene.visual.scene = "external-video";
@@ -131,7 +133,25 @@ test("every room has deterministic visual variation", () => {
     const first = buildCandidates(roomId, 2, "previous");
     const second = buildCandidates(roomId, 2, "previous");
     assert.deepEqual(first.map(({ visual }) => visual), second.map(({ visual }) => visual));
-    assert.ok(new Set(first.map(({ visual }) => visual.style)).size >= 3, roomId);
+    assert.equal(new Set(first.map(({ visual }) => visual.setting)).size, 3, roomId);
+  }
+});
+
+test("Jev can compose setting, cast and atmosphere independently", () => {
+  for (const roomId of roomIds) {
+    const options = visualChoiceCriteria(roomId);
+    const base = createVisualProgram(roomId);
+    const decisions = {
+      setting: Object.keys(options.setting)[2],
+      cast: Object.keys(options.cast)[1],
+      atmosphere: Object.keys(options.atmosphere)[2],
+    };
+    const composed = composeVisualProgram(base, decisions);
+    assert.deepEqual(composed, { ...base, ...decisions });
+    assert.deepEqual(composeVisualProgram(base, {
+      setting: "__proto__", cast: "constructor", atmosphere: "https://untrusted.example/art.js",
+    }), base);
+    assert.deepEqual(composeVisualProgram(base, null), base);
   }
 });
 
