@@ -1,12 +1,11 @@
 import gleam/int
-import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/element/keyed
 import lustre/event
 
 // ---------------------------------------------------------------- identity
@@ -15,187 +14,97 @@ pub const station_name = "8BIT.CAFE"
 
 pub const dj_name = "DJ PIXEL"
 
-pub const station_tagline = "ONE CHANNEL · ONE AUTO-DJ · REAL OPEN CHIPTUNE"
+pub const station_tagline = "ONE CHANNEL · ONE AUTO-DJ · FRESH CHIPTUNE"
 
 // ------------------------------------------------------------------ model
 
-/// A real, openly licensed chiptune release from an artist in the cafe's
-/// roster. Every track keeps the credits needed to stream it legally:
-/// the artist's site, the release source, and the license.
-pub type Track {
-  Track(
-    id: String,
-    artist: String,
+/// The release currently on the decks. The DJ engine fills this from the live
+/// feed, so the UI never needs to know where the track came from.
+pub type NowPlaying {
+  NowPlaying(
     title: String,
+    artist: String,
     album: String,
     released: String,
-    seconds: Int,
-    audio_url: String,
     artist_url: String,
+    track_url: String,
     license: String,
     license_url: String,
-    source_url: String,
+    seconds: Int,
     accent: String,
     accent_alt: String,
   )
 }
 
+pub type UpNext {
+  UpNext(title: String, artist: String)
+}
+
 pub type StreamStatus {
   Tuning
   Live
+  Paused
   Blocked
   Failed
 }
 
 pub type Model {
   Model(
-    tracks: List(Track),
-    active_index: Int,
+    now: NowPlaying,
+    next: Option(UpNext),
     status: StreamStatus,
     mixes: Int,
     muted: Bool,
+    playing: Bool,
+    position: Int,
+    duration: Int,
   )
 }
 
-// ---------------------------------------------------------------- catalog
-
-/// Real releases from artists who publish their chiptune openly. Ordered
-/// newest first, so the auto-DJ always opens with the freshest release in the
-/// roster. Audio is streamed from the Internet Archive's open music collection.
-pub fn catalog() -> List(Track) {
-  [
-    Track(
-      id: "komiku-boss-fight-circuit",
-      artist: "Komiku",
-      title: "Boss Fight Circuit",
-      album: "Incredible Kart Game",
-      released: "2021-01-01",
-      seconds: 208,
-      audio_url: "https://archive.org/download/komiku-incredible-kart-game/Boss%20Fight%20Circuit.mp3",
-      artist_url: "https://loyaltyfreakmusic.com/",
-      license: "CC0 1.0",
-      license_url: "https://creativecommons.org/publicdomain/zero/1.0/",
-      source_url: "https://archive.org/details/komiku-incredible-kart-game",
-      accent: "#3affa0",
-      accent_alt: "#3ae8ff",
-    ),
-    Track(
-      id: "ozzed-top-city",
-      artist: "Ozzed",
-      title: "Top City",
-      album: "Friendship Adventure",
-      released: "2018-01-15",
-      seconds: 100,
-      audio_url: "https://archive.org/download/jamendo-174068/06-1513270-Ozzed-Top%20City.mp3",
-      artist_url: "https://ozzed.net/",
-      license: "CC BY-SA 3.0",
-      license_url: "https://creativecommons.org/licenses/by-sa/3.0/",
-      source_url: "https://archive.org/details/jamendo-174068",
-      accent: "#ffb03a",
-      accent_alt: "#ff3ad4",
-    ),
-    Track(
-      id: "rolemusic-the-white-kitty",
-      artist: "Rolemusic",
-      title: "The White Kitty",
-      album: "The Black Dot",
-      released: "2017-10-14",
-      seconds: 198,
-      audio_url: "https://archive.org/download/TheBlackDot/01_rolemusic_-_the_white_kitty.mp3",
-      artist_url: "http://rolemusic.sawsquarenoise.com/",
-      license: "CC BY 4.0",
-      license_url: "https://creativecommons.org/licenses/by/4.0/",
-      source_url: "https://archive.org/details/TheBlackDot",
-      accent: "#b46bff",
-      accent_alt: "#3ae8ff",
-    ),
-    Track(
-      id: "juhani-grasslands",
-      artist: "Juhani Junkala",
-      title: "Grasslands",
-      album: "JRPG Pack 1: Exploration",
-      released: "2017-05-12",
-      seconds: 72,
-      audio_url: "https://archive.org/download/JuhaniJunkala-JRPGpack1-Exploration/Exploration1%20-%20Grasslands.mp3",
-      artist_url: "https://juhanijunkala.com/",
-      license: "CC0 1.0",
-      license_url: "https://creativecommons.org/publicdomain/zero/1.0/",
-      source_url: "https://archive.org/details/JuhaniJunkala-JRPGpack1-Exploration",
-      accent: "#9bbc0f",
-      accent_alt: "#3affa0",
-    ),
-    Track(
-      id: "visager-battle",
-      artist: "Visager",
-      title: "Battle!",
-      album: "Songs From An Unmade World 2",
-      released: "2016-04-26",
-      seconds: 125,
-      audio_url: "https://archive.org/download/Songs_From_An_Unmade_World_2-20459/Visager_-_05_-_Battle.mp3",
-      artist_url: "https://visager.net/",
-      license: "CC BY 4.0",
-      license_url: "https://creativecommons.org/licenses/by/4.0/",
-      source_url: "https://archive.org/details/Songs_From_An_Unmade_World_2-20459",
-      accent: "#ff3ad4",
-      accent_alt: "#ffb03a",
-    ),
-    Track(
-      id: "roccow-play-nicely",
-      artist: "RoccoW",
-      title: "Play Nicely",
-      album: "Weeklybeats 2014",
-      released: "2014-01-01",
-      seconds: 120,
-      audio_url: "https://archive.org/download/Weeklybeats_2014-15889/RoccoW_-_03_-_Weeklybeats_2014_3_-_Play_Nicely.mp3",
-      artist_url: "https://roccow.bandcamp.com/",
-      license: "CC BY-SA 4.0",
-      license_url: "https://creativecommons.org/licenses/by-sa/4.0/",
-      source_url: "https://archive.org/details/Weeklybeats_2014-15889",
-      accent: "#3ae8ff",
-      accent_alt: "#b46bff",
-    ),
-    Track(
-      id: "eric-skiff-chibi-ninja",
-      artist: "Eric Skiff",
-      title: "Chibi Ninja",
-      album: "Resistor Anthems",
-      released: "2005-10-28",
-      seconds: 123,
-      audio_url: "https://archive.org/download/Resistor_Anthems-9016/Eric_Skiff_-_03_-_Chibi_Ninja.mp3",
-      artist_url: "https://ericskiff.com/music/",
-      license: "CC BY 3.0",
-      license_url: "https://creativecommons.org/licenses/by/3.0/",
-      source_url: "https://archive.org/details/Resistor_Anthems-9016",
-      accent: "#3ae8ff",
-      accent_alt: "#ff3ad4",
-    ),
-  ]
+fn placeholder() -> NowPlaying {
+  NowPlaying(
+    title: "TUNING THE FEED",
+    artist: "8BIT.CAFE",
+    album: "LATEST CHIPTUNE",
+    released: "",
+    artist_url: "",
+    track_url: "",
+    license: "",
+    license_url: "",
+    seconds: 0,
+    accent: "#3ae8ff",
+    accent_alt: "#ff3ad4",
+  )
 }
 
-/// The release currently on the decks. `active_index` is driven by the DJ
-/// engine and always wraps around the roster.
-pub fn track_at(tracks: List(Track), index: Int) -> Track {
-  let assert [_, ..] = tracks
-  let length = list.length(tracks)
-  let offset = { index % length + length } % length
-  let assert [track, ..] = list.drop(tracks, offset)
-  track
-}
+// ---------------------------------------------------------------- helpers
 
-pub fn next_index(length: Int, index: Int) -> Int {
-  case length {
-    0 -> 0
-    _ -> { index + 1 } % length
+pub fn format_time(seconds: Int) -> String {
+  let safe = case seconds < 0 {
+    True -> 0
+    False -> seconds
   }
+  let assert Ok(minutes) = int.divide(safe, 60)
+  let rest = safe % 60
+  let suffix = case rest < 10 {
+    True -> "0" <> int.to_string(rest)
+    False -> int.to_string(rest)
+  }
+  int.to_string(minutes) <> ":" <> suffix
 }
 
-/// The release the DJ has already lined up next.
-pub fn up_next(tracks: List(Track), index: Int) -> Track {
-  track_at(tracks, next_index(list.length(tracks), index))
-}
-
-pub fn track_seconds(track: Track) -> Int {
-  track.seconds
+pub fn progress_percent(position: Int, duration: Int) -> Int {
+  case duration <= 0 {
+    True -> 0
+    False -> {
+      let assert Ok(percent) = int.divide(position * 100, duration)
+      case percent {
+        _ if percent < 0 -> 0
+        _ if percent > 100 -> 100
+        _ -> percent
+      }
+    }
+  }
 }
 
 /// Zero-padded set counter used by the broadcast deck.
@@ -212,51 +121,10 @@ pub fn status_label(status: StreamStatus) -> String {
   case status {
     Tuning -> "TUNING"
     Live -> "ON AIR"
+    Paused -> "PAUSED"
     Blocked -> "SOUND LOCKED"
     Failed -> "SIGNAL LOST"
   }
-}
-
-/// The DJ engine receives the whole catalog as JSON so it can stream the real
-/// audio files and crossfade between them without a round-trip to the UI.
-pub fn playlist_json() -> String {
-  "[" <> string.join(list.map(catalog(), track_json), ",") <> "]"
-}
-
-fn track_json(track: Track) -> String {
-  "{\"id\":\""
-  <> json_escape(track.id)
-  <> "\",\"artist\":\""
-  <> json_escape(track.artist)
-  <> "\",\"title\":\""
-  <> json_escape(track.title)
-  <> "\",\"album\":\""
-  <> json_escape(track.album)
-  <> "\",\"released\":\""
-  <> json_escape(track.released)
-  <> "\",\"seconds\":"
-  <> int.to_string(track.seconds)
-  <> ",\"audio_url\":\""
-  <> json_escape(track.audio_url)
-  <> "\",\"artist_url\":\""
-  <> json_escape(track.artist_url)
-  <> "\",\"license\":\""
-  <> json_escape(track.license)
-  <> "\",\"license_url\":\""
-  <> json_escape(track.license_url)
-  <> "\",\"source_url\":\""
-  <> json_escape(track.source_url)
-  <> "\",\"accent\":\""
-  <> json_escape(track.accent)
-  <> "\",\"accent_alt\":\""
-  <> json_escape(track.accent_alt)
-  <> "\"}"
-}
-
-fn json_escape(value: String) -> String {
-  value
-  |> string.replace("\\", "\\\\")
-  |> string.replace("\"", "\\\"")
 }
 
 // ------------------------------------------------------------------- ffi
@@ -264,10 +132,36 @@ fn json_escape(value: String) -> String {
 @external(erlang, "chipcafe_ffi", "start_dj")
 @external(javascript, "./chipcafe_ffi.mjs", "startDj")
 fn start_dj(
-  playlist_json: String,
-  on_track: fn(Int) -> Nil,
-  on_status: fn(String) -> Nil,
+  on_track: fn(
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Int,
+    String,
+    String,
+  ) -> Nil,
+  on_progress: fn(Int, Int) -> Nil,
+  on_state: fn(String, Bool) -> Nil,
 ) -> Nil
+
+@external(erlang, "chipcafe_ffi", "toggle_playback")
+@external(javascript, "./chipcafe_ffi.mjs", "togglePlayback")
+fn toggle_playback() -> Nil
+
+@external(erlang, "chipcafe_ffi", "next_track")
+@external(javascript, "./chipcafe_ffi.mjs", "nextTrack")
+fn next_track() -> Nil
+
+@external(erlang, "chipcafe_ffi", "previous_track")
+@external(javascript, "./chipcafe_ffi.mjs", "previousTrack")
+fn previous_track() -> Nil
 
 @external(erlang, "chipcafe_ffi", "set_muted")
 @external(javascript, "./chipcafe_ffi.mjs", "setMuted")
@@ -276,21 +170,64 @@ fn set_muted(muted: Bool) -> Nil
 // ------------------------------------------------------------------ update
 
 pub type Msg {
-  TrackChanged(Int)
-  StatusChanged(String)
+  TrackChanged(NowPlaying, UpNext)
+  ProgressChanged(Int, Int)
+  StateChanged(String, Bool)
   ToggleMute
+  TogglePlayback
+  NextTrack
+  PreviousTrack
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
-  let tracks = catalog()
   let model =
-    Model(tracks:, active_index: 0, status: Tuning, mixes: 1, muted: False)
+    Model(
+      now: placeholder(),
+      next: None,
+      status: Tuning,
+      mixes: 0,
+      muted: False,
+      playing: False,
+      position: 0,
+      duration: 0,
+    )
   let effect =
     effect.from(fn(dispatch) {
       start_dj(
-        playlist_json(),
-        fn(index) { dispatch(TrackChanged(index)) },
-        fn(status) { dispatch(StatusChanged(status)) },
+        fn(
+          title,
+          artist,
+          album,
+          released,
+          artist_url,
+          track_url,
+          license,
+          license_url,
+          next_title,
+          next_artist,
+          seconds,
+          accent,
+          accent_alt,
+        ) {
+          dispatch(TrackChanged(
+            NowPlaying(
+              title:,
+              artist:,
+              album:,
+              released:,
+              artist_url:,
+              track_url:,
+              license:,
+              license_url:,
+              seconds:,
+              accent:,
+              accent_alt:,
+            ),
+            UpNext(title: next_title, artist: next_artist),
+          ))
+        },
+        fn(position, duration) { dispatch(ProgressChanged(position, duration)) },
+        fn(status, playing) { dispatch(StateChanged(status, playing)) },
       )
     })
   #(model, effect)
@@ -298,31 +235,58 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    TrackChanged(index) -> #(
-      Model(..model, active_index: index, mixes: model.mixes + 1),
+    TrackChanged(now, next) -> #(
+      Model(
+        ..model,
+        now:,
+        next: Some(next),
+        mixes: model.mixes + 1,
+        position: 0,
+        duration: now.seconds,
+      ),
       effect.none(),
     )
-    StatusChanged("live") -> #(Model(..model, status: Live), effect.none())
-    StatusChanged("blocked") -> #(
-      Model(..model, status: Blocked),
+    ProgressChanged(position, duration) -> #(
+      Model(..model, position:, duration: case duration {
+        0 -> model.duration
+        _ -> duration
+      }),
       effect.none(),
     )
-    StatusChanged("failed") -> #(Model(..model, status: Failed), effect.none())
-    StatusChanged(_) -> #(model, effect.none())
+    StateChanged("live", playing) -> #(
+      Model(..model, status: Live, playing:),
+      effect.none(),
+    )
+    StateChanged("paused", playing) -> #(
+      Model(..model, status: Paused, playing:),
+      effect.none(),
+    )
+    StateChanged("blocked", playing) -> #(
+      Model(..model, status: Blocked, playing:),
+      effect.none(),
+    )
+    StateChanged("failed", playing) -> #(
+      Model(..model, status: Failed, playing:),
+      effect.none(),
+    )
+    StateChanged(_, playing) -> #(Model(..model, playing:), effect.none())
     ToggleMute -> {
       let muted = !model.muted
       let effect = effect.from(fn(_) { set_muted(muted) })
       #(Model(..model, muted:), effect)
     }
+    TogglePlayback -> #(model, effect.from(fn(_) { toggle_playback() }))
+    NextTrack -> #(model, effect.from(fn(_) { next_track() }))
+    PreviousTrack -> #(model, effect.from(fn(_) { previous_track() }))
   }
 }
 
 // -------------------------------------------------------------------- view
 
 fn view(model: Model) -> Element(Msg) {
-  let track = track_at(model.tracks, model.active_index)
   let status_class = case model.status {
     Live -> "is-live"
+    Paused -> "is-paused"
     Blocked -> "is-blocked"
     Failed -> "is-failed"
     Tuning -> "is-tuning"
@@ -330,20 +294,20 @@ fn view(model: Model) -> Element(Msg) {
   html.div(
     [
       attribute.class("dj-screen " <> status_class),
-      attribute.style("--accent", track.accent),
-      attribute.style("--accent-alt", track.accent_alt),
+      attribute.style("--accent", model.now.accent),
+      attribute.style("--accent-alt", model.now.accent_alt),
     ],
     [
       html.canvas([
         attribute.id("vj-art"),
         attribute.class("vj-art"),
-        attribute.width(480),
-        attribute.height(270),
+        attribute.width(320),
+        attribute.height(180),
         attribute.aria("hidden", "true"),
       ]),
       html.div([attribute.class("vj-shade")], []),
       view_topbar(model.status),
-      view_deck(track, model),
+      view_deck(model),
       view_console(model),
       case model.status {
         Blocked -> view_sound_gate()
@@ -361,7 +325,7 @@ fn view_topbar(status: StreamStatus) -> Element(Msg) {
     ]),
     html.div([attribute.class("signal-cluster")], [
       html.span([attribute.class("dj-tag")], [
-        element.text("AUTO-DJ · REAL OPEN RELEASES"),
+        element.text("AUTO-DJ · " <> dj_name),
       ]),
       html.span([attribute.class("on-air")], [
         html.span([attribute.class("on-air-dot")], []),
@@ -371,105 +335,163 @@ fn view_topbar(status: StreamStatus) -> Element(Msg) {
   ])
 }
 
-fn view_deck(track: Track, model: Model) -> Element(Msg) {
+fn view_deck(model: Model) -> Element(Msg) {
   html.main([attribute.class("deck")], [
     html.section([attribute.class("now-card")], [
       html.p([attribute.class("eyebrow")], [element.text("NOW MIXING")]),
-      html.h1([attribute.class("track-title")], [element.text(track.title)]),
+      html.h1([attribute.class("track-title")], [element.text(model.now.title)]),
       html.p([attribute.class("track-artist")], [
-        html.a(
-          [
-            attribute.href(track.artist_url),
-            attribute.target("_blank"),
-            attribute.rel("noopener noreferrer"),
-            attribute.class("artist-link"),
-          ],
-          [element.text(track.artist)],
-        ),
-        html.span([attribute.class("dot")], [element.text("·")]),
-        element.text(track.album),
+        view_artist(model.now),
+        case model.now.album {
+          "" -> element.none()
+          album ->
+            html.span([attribute.class("album")], [
+              html.span([attribute.class("dot")], [element.text("·")]),
+              element.text(album),
+            ])
+        },
       ]),
-      html.div([attribute.class("track-meta")], [
-        html.span([], [element.text("RELEASED " <> track.released)]),
-        html.a(
-          [
-            attribute.href(track.license_url),
-            attribute.target("_blank"),
-            attribute.rel("noopener noreferrer"),
-            attribute.class("meta-link"),
-            attribute.title("License for this track"),
-          ],
-          [element.text(track.license)],
-        ),
-        html.a(
-          [
-            attribute.href(track.artist_url),
-            attribute.target("_blank"),
-            attribute.rel("noopener noreferrer"),
-            attribute.class("meta-link"),
-            attribute.title("Artist website"),
-          ],
-          [element.text("ARTIST SITE ↗")],
-        ),
-        html.a(
-          [
-            attribute.href(track.source_url),
-            attribute.target("_blank"),
-            attribute.rel("noopener noreferrer"),
-            attribute.class("meta-link"),
-            attribute.title("Original open release"),
-          ],
-          [element.text("OPEN RELEASE ↗")],
-        ),
-      ]),
-      view_progress(track),
-      html.div([attribute.class("mix-caption")], [
-        html.span([], [element.text("MIX #" <> mix_number(model.mixes))]),
-        html.span([], [element.text("LIVE BLEND · ARTISTS CREDITED")]),
-      ]),
+      view_meta(model.now),
+      view_transport(model),
+      view_progress(model),
+      view_caption(model),
     ]),
     view_next_card(model),
   ])
 }
 
-fn view_progress(track: Track) -> Element(Msg) {
-  let duration = int.to_string(track_seconds(track)) <> "s"
-  html.div([attribute.class("mix-progress"), attribute.aria("hidden", "true")], [
-    keyed.element("div", [], [
-      #(
-        track.id,
-        html.div(
-          [
-            attribute.class("mix-fill"),
-            attribute.style("animation-duration", duration),
-          ],
-          [],
-        ),
-      ),
-    ]),
-  ])
-}
-
-fn view_next_card(model: Model) -> Element(Msg) {
-  let next = up_next(model.tracks, model.active_index)
-  html.aside([attribute.class("next-card")], [
-    html.p([attribute.class("eyebrow")], [element.text("UP NEXT")]),
-    html.h2([attribute.class("next-title")], [element.text(next.title)]),
-    html.p([attribute.class("next-artist")], [
+fn view_artist(now: NowPlaying) -> Element(Msg) {
+  case now.artist_url {
+    "" -> element.text(now.artist)
+    href ->
       html.a(
         [
-          attribute.href(next.artist_url),
+          attribute.href(href),
           attribute.target("_blank"),
           attribute.rel("noopener noreferrer"),
           attribute.class("artist-link"),
         ],
-        [element.text(next.artist)],
+        [element.text(now.artist)],
+      )
+  }
+}
+
+fn view_meta(now: NowPlaying) -> Element(Msg) {
+  html.div([attribute.class("track-meta")], [
+    case now.released {
+      "" -> element.none()
+      released -> html.span([], [element.text("RELEASED " <> released)])
+    },
+    case now.license {
+      "" -> element.none()
+      license ->
+        html.a(
+          [
+            attribute.href(now.license_url),
+            attribute.target("_blank"),
+            attribute.rel("noopener noreferrer"),
+            attribute.class("meta-link"),
+            attribute.title("License"),
+          ],
+          [element.text(license)],
+        )
+    },
+    case now.track_url {
+      "" -> element.none()
+      track_url ->
+        html.a(
+          [
+            attribute.href(track_url),
+            attribute.target("_blank"),
+            attribute.rel("noopener noreferrer"),
+            attribute.class("meta-link"),
+            attribute.title("Listen on Audius"),
+          ],
+          [element.text("AUDIUS ↗")],
+        )
+    },
+  ])
+}
+
+fn view_transport(model: Model) -> Element(Msg) {
+  let play_icon = case model.playing {
+    True -> "❚❚"
+    False -> "▶"
+  }
+  let play_label = case model.playing {
+    True -> "Pause"
+    False -> "Play"
+  }
+  html.div([attribute.class("transport")], [
+    html.button(
+      [
+        attribute.class("transport-btn"),
+        attribute.title("Previous track"),
+        attribute.aria("label", "Previous track"),
+        event.on_click(PreviousTrack),
+      ],
+      [element.text("◀◀")],
+    ),
+    html.button(
+      [
+        attribute.class("transport-btn play"),
+        attribute.title(play_label),
+        attribute.aria("label", play_label),
+        event.on_click(TogglePlayback),
+      ],
+      [element.text(play_icon)],
+    ),
+    html.button(
+      [
+        attribute.class("transport-btn"),
+        attribute.title("Next track"),
+        attribute.aria("label", "Next track"),
+        event.on_click(NextTrack),
+      ],
+      [element.text("▶▶")],
+    ),
+  ])
+}
+
+fn view_progress(model: Model) -> Element(Msg) {
+  let percent = progress_percent(model.position, model.duration)
+  html.div([attribute.class("mix-progress"), attribute.aria("hidden", "true")], [
+    html.div(
+      [
+        attribute.class("mix-fill"),
+        attribute.style("width", int.to_string(percent) <> "%"),
+      ],
+      [],
+    ),
+  ])
+}
+
+fn view_caption(model: Model) -> Element(Msg) {
+  html.div([attribute.class("mix-caption")], [
+    html.span([], [element.text("MIX #" <> mix_number(model.mixes))]),
+    html.span([attribute.class("mix-time")], [
+      element.text(
+        format_time(model.position) <> " / " <> format_time(model.duration),
       ),
     ]),
-    html.div(
-      [attribute.class("equalizer")],
-      list.map(list.repeat(0, 12), fn(_) { html.span([], []) }),
-    ),
+    html.span([], [element.text("LIVE BLEND")]),
+  ])
+}
+
+fn view_next_card(model: Model) -> Element(Msg) {
+  html.aside([attribute.class("next-card")], [
+    html.p([attribute.class("eyebrow")], [element.text("UP NEXT")]),
+    case model.next {
+      Some(next) ->
+        html.div([], [
+          html.h2([attribute.class("next-title")], [element.text(next.title)]),
+          html.p([attribute.class("next-artist")], [element.text(next.artist)]),
+        ])
+      None ->
+        html.p([attribute.class("next-artist")], [
+          element.text("BUILDING THE NEXT MIX"),
+        ])
+    },
     html.p([attribute.class("next-note")], [
       element.text("THE DJ IS ALREADY BEATMATCHING IT"),
     ]),
@@ -484,12 +506,10 @@ fn view_console(model: Model) -> Element(Msg) {
   html.footer([attribute.class("console")], [
     html.div([attribute.class("console-ticker")], [
       html.span([attribute.class("ticker-dot")], []),
-      element.text(
-        "STREAMING REAL OPEN CHIPTUNE VIA INTERNET ARCHIVE · ARTISTS CREDITED",
-      ),
+      element.text("LATEST CHIPTUNE · AUTO-MIXED · 24/7"),
     ]),
     html.div([attribute.class("console-controls")], [
-      html.span([attribute.class("set-clock")], [element.text("24/7 · AUTO")]),
+      html.span([attribute.class("set-clock")], [element.text("LIVE FEED")]),
       html.button(
         [
           attribute.class("sound-btn"),

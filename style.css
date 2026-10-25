@@ -87,16 +87,6 @@ body::before {
   50% { transform: scale(1.55); opacity: 0.55; }
 }
 
-@keyframes mix-fill {
-  from { width: 0%; }
-  to { width: 100%; }
-}
-
-@keyframes eq-bounce {
-  0%, 100% { transform: scaleY(0.22); }
-  50% { transform: scaleY(1); }
-}
-
 @keyframes ticker-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
@@ -224,9 +214,14 @@ body::before {
   border-color: var(--red);
 }
 
-.is-blocked .on-air {
+.is-blocked .on-air,
+.is-paused .on-air {
   color: var(--amber);
   border-color: var(--amber);
+}
+
+.is-paused .on-air-dot {
+  animation: none;
 }
 
 .is-failed .on-air {
@@ -250,7 +245,7 @@ body::before {
 }
 
 .now-card {
-  width: min(720px, 100%);
+  width: min(660px, 100%);
   background: rgba(8, 6, 20, 0.84);
   border: 4px solid var(--accent);
   border-left-width: 10px;
@@ -365,9 +360,7 @@ body::before {
     var(--accent-alt)
   );
   box-shadow: 0 0 14px var(--accent);
-  animation-name: mix-fill;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
+  transition: width 0.45s linear;
 }
 
 .mix-caption {
@@ -383,6 +376,46 @@ body::before {
 
 .mix-caption span:first-child {
   color: var(--ink);
+}
+
+.mix-caption .mix-time {
+  color: var(--ink);
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.transport-btn {
+  font-family: var(--font-head);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--ink);
+  background: rgba(20, 16, 42, 0.9);
+  border: 2px solid rgba(232, 228, 255, 0.4);
+  padding: 9px 13px;
+  cursor: pointer;
+  transition: background 0.08s steps(2), color 0.08s steps(2), border-color 0.08s steps(2);
+}
+
+.transport-btn:hover,
+.transport-btn:focus-visible {
+  color: #06120c;
+  background: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.transport-btn.play {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.track-artist .album {
+  color: var(--dim);
 }
 
 /* ------------------------------------------------------------- next card */
@@ -415,32 +448,6 @@ body::before {
   font-size: 22px;
   color: var(--dim);
 }
-
-.equalizer {
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 42px;
-  margin-top: 18px;
-}
-
-.equalizer span {
-  flex: 1;
-  height: 100%;
-  background: linear-gradient(
-    to top,
-    var(--accent),
-    var(--accent-alt)
-  );
-  transform-origin: bottom;
-  animation: eq-bounce 1.05s ease-in-out infinite;
-  opacity: 0.8;
-}
-
-.equalizer span:nth-child(2n) { animation-duration: 0.82s; }
-.equalizer span:nth-child(3n) { animation-duration: 1.24s; }
-.equalizer span:nth-child(4n) { animation-duration: 0.68s; }
-.equalizer span:nth-child(5n) { animation-duration: 1.42s; }
 
 .next-note {
   margin-top: 14px;
@@ -547,11 +554,46 @@ body::before {
 /* -------------------------------------------------------------- responsive */
 
 @media (max-width: 860px) {
+  .dj-screen {
+    overflow: visible;
+  }
+
+  .vj-art {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    height: 46vh;
+    object-position: 50% 48%;
+  }
+
+  .vj-shade {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    height: 46vh;
+    background:
+      linear-gradient(
+        to bottom,
+        rgba(6, 4, 14, 0.84) 0%,
+        rgba(6, 4, 14, 0.08) 34%,
+        rgba(6, 4, 14, 0.5) 82%,
+        rgba(10, 6, 20, 1) 100%
+      );
+  }
+
   .deck {
     flex-direction: column;
     align-items: stretch;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 18px;
+    margin-top: 20vh;
+    padding-top: 0;
   }
 
   .now-card,
@@ -561,10 +603,6 @@ body::before {
 
   .next-card {
     align-self: stretch;
-  }
-
-  .next-card .equalizer {
-    height: 30px;
   }
 }
 
@@ -602,6 +640,16 @@ body::before {
     flex-wrap: wrap;
   }
 
+  .transport {
+    gap: 7px;
+  }
+
+  .transport-btn {
+    flex: 1;
+    font-size: 9px;
+    padding: 9px 8px;
+  }
+
   .next-card {
     padding: 16px;
   }
@@ -624,15 +672,13 @@ body::before {
 
 @media (prefers-reduced-motion: reduce) {
   body::after,
-  .equalizer span,
   .on-air-dot,
   .ticker-dot,
-  .sound-gate,
-  .mix-fill {
+  .sound-gate {
     animation: none;
   }
 
   .mix-fill {
-    width: 100%;
+    transition: none;
   }
 }
