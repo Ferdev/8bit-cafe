@@ -1,19 +1,11 @@
-// 8bit.cafe auto-DJ: generated chiptunes, beatmatched crossfades, and a
-// pixel-art VJ that reacts to the analyser in real time.
+// 8bit.cafe streaming auto-DJ: real open-licensed chiptune files, two decks
+// with beatmatched crossfades, and a pixel-art VJ driven by the live analyser.
 
-const TOTAL_STEPS = 16 * 16;
-const MIX_TAIL_STEPS = 24;
-const LOOKAHEAD = 0.12;
-const TICK_MS = 25;
+const CROSSFADE_SECONDS = 4;
+const FADE_SECONDS = 2.6;
+const TICK_MS = 250;
 const CANVAS_W = 480;
 const CANVAS_H = 270;
-
-const SCALES = [
-  [0, 2, 3, 5, 7, 8, 10],
-  [0, 2, 4, 5, 7, 9, 11],
-  [0, 3, 5, 7, 10],
-  [0, 2, 3, 5, 7, 9, 10],
-];
 
 const engine = {
   ctx: null,
@@ -21,10 +13,13 @@ const engine = {
   master: null,
   analyser: null,
   freqData: null,
-  noise: null,
-  delaySend: null,
-  tracks: [],
-  onFinish: null,
+  decks: [],
+  active: 0,
+  crossfading: false,
+  playlist: [],
+  notified: null,
+  errorCount: 0,
+  onTrack: null,
   onStatus: null,
   lastStatus: "",
   muted: false,
@@ -35,30 +30,17 @@ const engine = {
   canvasWanted: false,
   stars: [],
   particles: [],
+  spectrum: Array.from({ length: 32 }, () => 0.2),
   energy: { bass: 0, mid: 0, high: 0, level: 0 },
+  signal: 0,
   palette: { a: [58, 232, 255], b: [255, 58, 212] },
-  lastNow: 0,
   unlockInstalled: false,
 };
 
 // --------------------------------------------------------------- utilities
 
-function nowSeconds() {
-  return performance.now() / 1000;
-}
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
-}
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function random() {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function hexToRgb(hex) {
@@ -81,10 +63,6 @@ function mixRgb(a, b, amount) {
 
 function rgba(color, alpha) {
   return `rgba(${color[0]},${color[1]},${color[2]},${alpha})`;
-}
-
-function midiToFreq(note) {
-  return 440 * Math.pow(2, (note - 69) / 12);
 }
 
 // ----------------------------------------------------------------- status
@@ -122,25 +100,14 @@ function ensureAudio() {
   analyser.smoothingTimeConstant = 0.72;
 
   const master = ctx.createGain();
-  master.gain.value = engine.muted ? 0 : 0.55;
+  master.gain.value = engine.muted ? 0 : 0.7;
 
   const compressor = ctx.createDynamicsCompressor();
-  compressor.threshold.value = -16;
-  compressor.knee.value = 12;
-  compressor.ratio.value = 4;
+  compressor.threshold.value = -14;
+  compressor.knee.value = 10;
+  compressor.ratio.value = 3;
   compressor.attack.value = 0.004;
   compressor.release.value = 0.2;
-
-  const delay = ctx.createDelay(1);
-  delay.delayTime.value = 0.3125;
-  const feedback = ctx.createGain();
-  feedback.gain.value = 0.28;
-  const delaySend = ctx.createGain();
-  delaySend.gain.value = 0.35;
-  delaySend.connect(delay);
-  delay.connect(feedback);
-  feedback.connect(delay);
-  delay.connect(mixBus);
 
   mixBus.connect(analyser);
   analyser.connect(compressor);
@@ -152,35 +119,233 @@ function ensureAudio() {
   engine.analyser = analyser;
   engine.freqData = new Uint8Array(analyser.frequencyBinCount);
   engine.master = master;
-  engine.delaySend = delaySend;
-  engine.noise = makeNoiseBuffer(ctx);
 }
 
-function makeNoiseBuffer(ctx) {
-  const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i += 1) {
-    data[i] = Math.random() * 2 - 1;
+function ensureDecks() {
+  if (engine.decks.length > 0) return;
+  for (let index = 0; index < 2; index += 1) {
+    const element = new Audio();
+    element.crossOrigin = "anonymous";
+    element.preload = "auto";
+    element.setAttribute("playsinline", "");
+    element.style.display = "none";
+    document.body.appendChild(element);
+
+    const source = engine.ctx.createMediaElementSource(element);
+    const gain = engine.ctx.createGain();
+    gain.gain.value = index === 0 ? 1 : 0.0001;
+    source.connect(gain);
+    gain.connect(engine.mixBus);
+
+    const deck = { element, gain, index: null, failed: false };
+    element.addEventListener("ended", () => {
+      if (engine.decks[engine.active] === deck && !engine.crossfading) {
+        crossfade();
+      }
+    });
+    element.addEventListener("error", () => {
+      if (engine.decks[engine.active] === deck) {
+        skipBrokenTrack(index);
+      }
+    });
+    engine.decks.push(deck);
   }
-  return buffer;
 }
+
+function loadDeck(deckIndex, trackIndex) {
+  const deck = engine.decks[deckIndex];
+  const track = engine.playlist[trackIndex];
+  if (!deck || !track) return;
+  deck.index = trackIndex;
+  deck.failed = false;
+  let url = track.audio_url;
+  try {
+    url = new URL(track.audio_url, window.location.href).href;
+  } catch (_error) {
+    // Keep the original URL if it cannot be normalised.
+  }
+  if (deck.element.src !== url) {
+    deck.element.src = url;
+    deck.element.load();
+  }
+}
+
+function setPalette(track) {
+  if (!track) return;
+  engine.palette = {
+    a: hexToRgb(track.accent),
+    b: hexToRgb(track.accent_alt),
+  };
+}
+
+function notifyTrack(index) {
+  if (engine.notified === index) return;
+  engine.notified = index;
+  const callback = engine.onTrack;
+  if (typeof callback !== "function") return;
+  setTimeout(() => {
+    try {
+      callback(index);
+    } catch (_error) {
+      // Ignore a callback racing with a reload.
+    }
+  }, 0);
+}
+
+function playDeck(deckIndex) {
+  const deck = engine.decks[deckIndex];
+  if (!deck) return Promise.resolve();
+  const result = deck.element.play();
+  return result && typeof result.then === "function" ? result : Promise.resolve();
+}
+
+function refreshStatus() {
+  if (!engine.ctx) return;
+  if (engine.ctx.state === "running") {
+    removeUnlockListeners();
+    emitStatus("live");
+  } else {
+    emitStatus("blocked");
+  }
+}
+
+function startPlayback() {
+  const deck = engine.decks[engine.active];
+  if (!deck) return;
+  playDeck(engine.active)
+    .then(() => {
+      refreshStatus();
+    })
+    .catch((error) => {
+      if (error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
+        emitStatus("blocked");
+      } else {
+        skipBrokenTrack(engine.active);
+      }
+    });
+  if (engine.ctx && engine.ctx.state !== "running") {
+    engine.ctx.resume().then(refreshStatus).catch(() => emitStatus("blocked"));
+  }
+}
+
+function fadeIn(deck) {
+  const now = engine.ctx.currentTime;
+  deck.gain.gain.cancelScheduledValues(now);
+  deck.gain.gain.setValueAtTime(0.0001, now);
+  deck.gain.gain.exponentialRampToValueAtTime(1, now + FADE_SECONDS);
+}
+
+function fadeOut(deck) {
+  const now = engine.ctx.currentTime;
+  deck.gain.gain.cancelScheduledValues(now);
+  const current = Math.max(deck.gain.gain.value, 0.0001);
+  deck.gain.gain.setValueAtTime(current, now);
+  deck.gain.gain.exponentialRampToValueAtTime(0.0001, now + FADE_SECONDS);
+}
+
+function crossfade() {
+  if (engine.crossfading || engine.playlist.length === 0) return;
+  const oldDeckIndex = engine.active;
+  const oldDeck = engine.decks[oldDeckIndex];
+  const newDeckIndex = 1 - oldDeckIndex;
+  const newDeck = engine.decks[newDeckIndex];
+  if (!oldDeck || !newDeck) return;
+
+  const currentTrack = oldDeck.index ?? 0;
+  const nextTrack = (currentTrack + 1) % engine.playlist.length;
+
+  engine.crossfading = true;
+  if (newDeck.index !== nextTrack) loadDeck(newDeckIndex, nextTrack);
+  newDeck.gain.gain.cancelScheduledValues(engine.ctx.currentTime);
+  newDeck.gain.gain.setValueAtTime(0.0001, engine.ctx.currentTime);
+
+  playDeck(newDeckIndex)
+    .then(() => {
+      const now = engine.ctx.currentTime;
+      newDeck.gain.gain.exponentialRampToValueAtTime(1, now + FADE_SECONDS);
+      const currentGain = Math.max(oldDeck.gain.gain.value, 0.0001);
+      oldDeck.gain.gain.cancelScheduledValues(now);
+      oldDeck.gain.gain.setValueAtTime(currentGain, now);
+      oldDeck.gain.gain.exponentialRampToValueAtTime(0.0001, now + FADE_SECONDS);
+
+      engine.active = newDeckIndex;
+      engine.crossfading = false;
+      engine.errorCount = 0;
+      setPalette(engine.playlist[nextTrack]);
+      notifyTrack(nextTrack);
+      refreshStatus();
+
+      setTimeout(() => {
+        if (engine.active === oldDeckIndex) return;
+        oldDeck.element.pause();
+        oldDeck.element.currentTime = 0;
+        loadDeck(oldDeckIndex, (nextTrack + 1) % engine.playlist.length);
+      }, (FADE_SECONDS + 0.4) * 1000);
+    })
+    .catch((error) => {
+      engine.crossfading = false;
+      if (error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
+        emitStatus("blocked");
+      } else {
+        skipBrokenTrack(oldDeckIndex);
+      }
+    });
+}
+
+function skipBrokenTrack(deckIndex) {
+  if (engine.playlist.length === 0) return;
+  const deck = engine.decks[deckIndex];
+  if (!deck || deckIndex !== engine.active) return;
+  engine.errorCount += 1;
+  if (engine.errorCount > engine.playlist.length) {
+    emitStatus("failed");
+    return;
+  }
+  const nextTrack = ((deck.index ?? 0) + 1) % engine.playlist.length;
+  loadDeck(deckIndex, nextTrack);
+  deck.gain.gain.value = 1;
+  playDeck(deckIndex)
+    .then(() => {
+      setPalette(engine.playlist[nextTrack]);
+      notifyTrack(nextTrack);
+      refreshStatus();
+    })
+    .catch(() => emitStatus("blocked"));
+}
+
+function tick() {
+  if (!engine.ctx || engine.crossfading) return;
+  const deck = engine.decks[engine.active];
+  if (!deck) return;
+  const element = deck.element;
+  if (element.error) {
+    skipBrokenTrack(engine.active);
+    return;
+  }
+  const duration = element.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  const remaining = duration - element.currentTime;
+  if (remaining <= CROSSFADE_SECONDS && remaining > 0) {
+    crossfade();
+  }
+}
+
+// ------------------------------------------------------------------ unlock
 
 function unlockAudio() {
   if (!engine.ctx) return;
-  const ctx = engine.ctx;
-  if (ctx.state === "running") {
-    removeUnlockListeners();
-    emitStatus("live");
-    return;
-  }
-  ctx
+  engine.ctx
     .resume()
     .then(() => {
-      if (ctx.state === "running") {
-        removeUnlockListeners();
-        emitStatus("live");
-      } else {
+      if (engine.ctx.state !== "running") {
         emitStatus("blocked");
+        return;
+      }
+      removeUnlockListeners();
+      emitStatus("live");
+      const deck = engine.decks[engine.active];
+      if (deck && deck.element.paused) {
+        playDeck(engine.active).catch(() => {});
       }
     })
     .catch(() => emitStatus("blocked"));
@@ -204,229 +369,6 @@ function removeUnlockListeners() {
   document.removeEventListener("pointerdown", unlockEvent, true);
   document.removeEventListener("keydown", unlockEvent, true);
   document.removeEventListener("touchstart", unlockEvent, true);
-}
-
-// ------------------------------------------------------------------ tracks
-
-function makePattern(seed) {
-  const random = mulberry32(seed >>> 0);
-  const scale = SCALES[Math.floor(random() * SCALES.length)];
-  const root = 55 + Math.floor(random() * 8);
-  const lead = [];
-  const bass = [];
-  for (let step = 0; step < 16; step += 1) {
-    lead.push(random() < 0.2 ? -1 : Math.floor(random() * 7));
-    bass.push(random() < 0.3 ? -1 : Math.floor(random() * 5));
-  }
-  const kicks = [0, 8];
-  if (random() < 0.55) kicks.push(11);
-  if (random() < 0.3) kicks.push(6);
-  return { scale, root, lead, bass, kicks, progression: [0, 0, 5, 3] };
-}
-
-function beginTrack(trackId, bpm, seed, accent, accentAlt) {
-  ensureAudio();
-  if (!engine.ctx) return;
-
-  engine.palette = {
-    a: hexToRgb(accent),
-    b: hexToRgb(accentAlt),
-  };
-
-  const safeBpm = clamp(Number(bpm) || 128, 60, 200);
-  const stepDuration = 60 / safeBpm / 4;
-  const duration = TOTAL_STEPS * stepDuration;
-
-  const bus = engine.ctx.createGain();
-  const startAt = engine.ctx.currentTime;
-  bus.gain.setValueAtTime(0.0001, startAt);
-  bus.gain.exponentialRampToValueAtTime(0.72, startAt + 1.1);
-  bus.connect(engine.mixBus);
-
-  const track = {
-    id: String(trackId || "track"),
-    stepDuration,
-    duration,
-    mixTime: Math.max(2, duration - MIX_TAIL_STEPS * stepDuration),
-    startedAt: nowSeconds(),
-    nextTime: 0,
-    bus,
-    pattern: makePattern(Number(seed) || 1),
-    mixed: false,
-    removed: false,
-  };
-  engine.tracks.push(track);
-
-  if (engine.ctx.state !== "running") {
-    unlockAudio();
-    emitStatus("blocked");
-  } else {
-    emitStatus("live");
-  }
-}
-
-function fadeBus(bus, seconds) {
-  const ctx = engine.ctx;
-  if (!ctx) return;
-  const current = Math.max(bus.gain.value, 0.0001);
-  bus.gain.cancelScheduledValues(ctx.currentTime);
-  bus.gain.setValueAtTime(current, ctx.currentTime);
-  bus.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + seconds);
-}
-
-function voice(track, type, frequency, when, duration, volume, attack = 0.008) {
-  const ctx = engine.ctx;
-  const oscillator = ctx.createOscillator();
-  const gain = ctx.createGain();
-  oscillator.type = type;
-  oscillator.frequency.setValueAtTime(frequency, when);
-  gain.gain.setValueAtTime(0.0001, when);
-  gain.gain.exponentialRampToValueAtTime(volume, when + attack);
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
-  oscillator.connect(gain);
-  gain.connect(track.bus);
-  oscillator.start(when);
-  oscillator.stop(when + duration + 0.04);
-  return gain;
-}
-
-function leadVoice(track, frequency, when, duration) {
-  const gain = voice(track, "square", frequency, when, duration, 0.075, 0.006);
-  gain.connect(engine.delaySend);
-}
-
-function padVoice(track, frequency, when, duration) {
-  voice(track, "triangle", frequency, when, duration, 0.032, 0.22);
-  voice(track, "triangle", frequency * 1.005, when, duration, 0.024, 0.3);
-}
-
-function kick(track, when) {
-  const ctx = engine.ctx;
-  const oscillator = ctx.createOscillator();
-  const gain = ctx.createGain();
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(155, when);
-  oscillator.frequency.exponentialRampToValueAtTime(42, when + 0.12);
-  gain.gain.setValueAtTime(0.85, when);
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
-  oscillator.connect(gain);
-  gain.connect(track.bus);
-  oscillator.start(when);
-  oscillator.stop(when + 0.26);
-}
-
-function noiseHit(track, when, duration, volume, filterType, frequency) {
-  const ctx = engine.ctx;
-  const source = ctx.createBufferSource();
-  source.buffer = engine.noise;
-  const filter = ctx.createBiquadFilter();
-  filter.type = filterType;
-  filter.frequency.value = frequency;
-  filter.Q.value = 0.7;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(volume, when);
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(track.bus);
-  source.start(when, Math.random() * 0.4, duration + 0.02);
-}
-
-function scheduleStep(track, step, when) {
-  const pattern = track.pattern;
-  const bar = Math.floor(step / 16) % 4;
-  const position = step % 16;
-  const chord = pattern.root + pattern.progression[bar];
-
-  if (position === 0) {
-    const third = pattern.scale[2] ?? 3;
-    padVoice(track, midiToFreq(chord + 12), when, track.stepDuration * 15);
-    padVoice(track, midiToFreq(chord + 12 + third), when, track.stepDuration * 15);
-  }
-
-  if (position % 2 === 0 && pattern.bass[position] >= 0) {
-    const degree = pattern.scale[pattern.bass[position] % pattern.scale.length];
-    voice(
-      track,
-      "triangle",
-      midiToFreq(chord - 12 + degree),
-      when,
-      track.stepDuration * 1.7,
-      0.18,
-      0.01,
-    );
-  }
-
-  if (pattern.lead[position] >= 0) {
-    const degree = pattern.scale[pattern.lead[position] % pattern.scale.length];
-    leadVoice(track, midiToFreq(chord + 12 + degree), when, track.stepDuration * 1.35);
-  }
-
-  if (pattern.kicks.includes(position)) kick(track, when);
-  if (position === 4 || position === 12) {
-    noiseHit(track, when, 0.13, 0.2, "bandpass", 1900);
-  }
-  if (position % 2 === 1) {
-    noiseHit(track, when, 0.045, position === 15 ? 0.06 : 0.035, "highpass", 7200);
-  }
-}
-
-function tick() {
-  const ctx = engine.ctx;
-  if (!ctx) return;
-  const current = nowSeconds();
-  const running = ctx.state === "running";
-
-  for (const track of engine.tracks) {
-    if (track.removed) continue;
-    const elapsed = current - track.startedAt;
-
-    if (running) {
-      if (track.nextTime < elapsed - 0.08) {
-        track.nextTime = Math.ceil(elapsed / track.stepDuration) * track.stepDuration;
-      }
-      while (
-        track.nextTime < elapsed + LOOKAHEAD &&
-        track.nextTime < track.duration
-      ) {
-        const step = Math.round(track.nextTime / track.stepDuration);
-        const when = ctx.currentTime + Math.max(0, track.nextTime - elapsed);
-        scheduleStep(track, step, when);
-        track.nextTime += track.stepDuration;
-      }
-    } else {
-      track.nextTime = Math.ceil(elapsed / track.stepDuration) * track.stepDuration;
-    }
-
-    if (!track.mixed && elapsed >= track.mixTime) {
-      track.mixed = true;
-      fadeBus(track.bus, Math.max(0.4, track.duration - track.mixTime));
-      const onFinish = engine.onFinish;
-      if (typeof onFinish === "function") {
-        setTimeout(() => {
-          try {
-            onFinish();
-          } catch (_error) {
-            // Ignore a callback racing with a reload.
-          }
-        }, 0);
-      }
-    }
-
-    if (elapsed >= track.duration + 0.3) {
-      track.removed = true;
-      fadeBus(track.bus, 0.3);
-      setTimeout(() => {
-        try {
-          track.bus.disconnect();
-        } catch (_error) {
-          // Already disconnected.
-        }
-      }, 400);
-    }
-  }
-
-  engine.tracks = engine.tracks.filter((track) => !track.removed);
 }
 
 // ------------------------------------------------------------------- canvas
@@ -457,26 +399,46 @@ function ensureCanvas() {
   return true;
 }
 
-function readEnergy() {
+function readEnergy(time) {
   const target = { bass: 0, mid: 0, high: 0, level: 0 };
-  if (engine.analyser && engine.ctx && engine.ctx.state === "running") {
+  const hasAudio =
+    engine.analyser && engine.ctx && engine.ctx.state === "running";
+  let signalSum = 0;
+
+  if (hasAudio) {
     engine.analyser.getByteFrequencyData(engine.freqData);
     const data = engine.freqData;
+    for (let index = 1; index < 100; index += 1) signalSum += data[index];
     const average = (from, to) => {
       let total = 0;
-      for (let i = from; i < to; i += 1) total += data[i];
+      for (let index = from; index < to; index += 1) total += data[index];
       return total / ((to - from) * 255);
     };
     target.bass = Math.pow(average(1, 9), 1.25) * 1.7;
     target.mid = Math.pow(average(9, 34), 1.1) * 1.5;
     target.high = Math.pow(average(34, 92), 0.95) * 1.6;
     target.level = average(1, 100);
+    for (let index = 0; index < 32; index += 1) {
+      const bin = index + 2;
+      engine.spectrum[index] += ((data[bin] || 0) / 255 - engine.spectrum[index]) * 0.3;
+    }
+  }
+
+  const live = signalSum > 120;
+  if (live) {
+    engine.signal = 1;
   } else {
-    const time = performance.now() / 1000;
-    target.bass = 0.36 + 0.22 * Math.sin(time * 2.4);
-    target.mid = 0.3 + 0.18 * Math.sin(time * 3.7 + 1.3);
-    target.high = 0.22 + 0.16 * Math.sin(time * 5.1 + 2.1);
-    target.level = 0.32 + 0.1 * Math.sin(time * 2);
+    engine.signal = Math.max(0, engine.signal - 0.03);
+    target.bass = 0.34 + 0.24 * Math.sin(time * 2.2);
+    target.mid = 0.28 + 0.2 * Math.sin(time * 3.4 + 1.2);
+    target.high = 0.2 + 0.16 * Math.sin(time * 4.8 + 2.1);
+    target.level = 0.3 + 0.1 * Math.sin(time * 1.8);
+    for (let index = 0; index < 32; index += 1) {
+      const wave = Math.abs(
+        Math.sin(time * (1.1 + index * 0.09) + index * 0.7),
+      );
+      engine.spectrum[index] += (0.12 + wave * 0.26 - engine.spectrum[index]) * 0.15;
+    }
   }
 
   for (const key of Object.keys(target)) {
@@ -528,11 +490,10 @@ function draw(time) {
 
   const towers = 30;
   const towerWidth = CANVAS_W / towers;
-  const random = mulberry32(9871);
   for (let index = 0; index < towers; index += 1) {
-    const base = 12 + random() * 26;
-    const band = engine.freqData ? engine.freqData[(index % 32) + 2] / 255 : 0.2;
-    const height = base + band * 54 + energy.bass * 10;
+    const base = 12 + ((index * 37) % 23);
+    const band = engine.spectrum[index % 32];
+    const height = base + band * 58 + energy.bass * 10;
     const x = index * towerWidth;
     g.fillStyle = rgba(mixRgb([20, 10, 40], palette.a, 0.35), 0.92);
     g.fillRect(x + 1, horizon - height, towerWidth - 2, height);
@@ -579,24 +540,36 @@ function draw(time) {
     particle.y += particle.vy * 0.016;
     particle.life -= 0.012;
     g.fillStyle = rgba(particle.color, Math.max(0, particle.life) * 0.85);
-    g.fillRect(Math.round(particle.x), Math.round(particle.y), particle.size, particle.size);
+    g.fillRect(
+      Math.round(particle.x),
+      Math.round(particle.y),
+      particle.size,
+      particle.size,
+    );
   }
   engine.particles = engine.particles.filter((particle) => particle.life > 0);
 
-  if (engine.analyser && engine.ctx && engine.ctx.state === "running") {
-    const data = engine.freqData;
-    g.strokeStyle = rgba(mixRgb(palette.a, [255, 255, 255], 0.4), 0.65);
-    g.lineWidth = 1.5;
-    g.beginPath();
+  g.strokeStyle = rgba(mixRgb(palette.a, [255, 255, 255], 0.4), 0.65);
+  g.lineWidth = 1.5;
+  g.beginPath();
+  if (engine.signal > 0.5) {
     for (let index = 0; index < 64; index += 1) {
-      const value = data[index] / 255;
+      const value = engine.freqData[index] / 255;
       const x = (index / 63) * CANVAS_W;
       const y = horizon - 18 - value * 42;
       if (index === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
     }
-    g.stroke();
+  } else {
+    for (let index = 0; index < 64; index += 1) {
+      const x = (index / 63) * CANVAS_W;
+      const y =
+        horizon - 30 - Math.sin(time * 2.4 + index * 0.32) * 12 - engine.energy.mid * 10;
+      if (index === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
   }
+  g.stroke();
 }
 
 function frame(timestamp) {
@@ -605,42 +578,58 @@ function frame(timestamp) {
     ensureCanvas();
     return;
   }
-  readEnergy();
+  readEnergy(timestamp / 1000);
   draw(timestamp / 1000);
 }
 
 // --------------------------------------------------------------- public api
 
-export function startDj(trackId, bpm, seed, accent, accentAlt, onFinish, onStatus) {
-  engine.onFinish = onFinish;
+export function startDj(playlistJson, onTrack, onStatus) {
+  engine.onTrack = onTrack;
   engine.onStatus = onStatus;
-  ensureAudio();
-  ensureCanvas();
-  installUnlockListeners();
-  if (!engine.timer) engine.timer = setInterval(tick, TICK_MS);
-  if (!engine.raf) engine.raf = requestAnimationFrame(frame);
-  beginTrack(trackId, bpm, seed, accent, accentAlt);
-  if (engine.ctx && engine.ctx.state === "running") {
-    removeUnlockListeners();
-    emitStatus("live");
-  }
-}
-
-export function playTrack(trackId, bpm, seed, accent, accentAlt) {
-  if (!engine.ctx) {
-    startDj(trackId, bpm, seed, accent, accentAlt, engine.onFinish, engine.onStatus);
+  try {
+    engine.playlist = JSON.parse(playlistJson);
+  } catch (_error) {
+    engine.playlist = [];
+    emitStatus("failed");
     return;
   }
-  beginTrack(trackId, bpm, seed, accent, accentAlt);
+  if (!Array.isArray(engine.playlist) || engine.playlist.length === 0) {
+    emitStatus("failed");
+    return;
+  }
+
+  ensureAudio();
+  if (!engine.ctx) return;
+  ensureDecks();
+  ensureCanvas();
+  installUnlockListeners();
+
+  if (!engine.timer) engine.timer = setInterval(tick, TICK_MS);
+  if (!engine.raf) engine.raf = requestAnimationFrame(frame);
+
+  engine.active = 0;
+  engine.crossfading = false;
+  engine.notified = 0;
+  engine.errorCount = 0;
+  setPalette(engine.playlist[0]);
+  loadDeck(0, 0);
+  loadDeck(1, 1 % engine.playlist.length);
+  engine.decks[0].gain.gain.value = 1;
+  engine.decks[1].gain.gain.value = 0.0001;
+  startPlayback();
 }
 
 export function setMuted(muted) {
   engine.muted = Boolean(muted);
   if (!engine.ctx || !engine.master) return;
   const ctx = engine.ctx;
-  const target = engine.muted ? 0.0001 : 0.55;
+  const target = engine.muted ? 0.0001 : 0.7;
   engine.master.gain.cancelScheduledValues(ctx.currentTime);
-  engine.master.gain.setValueAtTime(Math.max(engine.master.gain.value, 0.0001), ctx.currentTime);
+  engine.master.gain.setValueAtTime(
+    Math.max(engine.master.gain.value, 0.0001),
+    ctx.currentTime,
+  );
   engine.master.gain.exponentialRampToValueAtTime(target, ctx.currentTime + 0.18);
 }
 
@@ -649,16 +638,19 @@ export function stopDj() {
   if (engine.raf) cancelAnimationFrame(engine.raf);
   engine.timer = null;
   engine.raf = null;
-  for (const track of engine.tracks) {
+  for (const deck of engine.decks) {
     try {
-      track.bus.disconnect();
+      deck.element.pause();
+      deck.element.removeAttribute("src");
+      deck.element.load();
     } catch (_error) {
-      // Already disconnected.
+      // Already torn down.
     }
   }
-  engine.tracks = [];
-  if (engine.ctx) {
+  if (engine.ctx && engine.ctx.state !== "closed") {
     engine.ctx.close().catch(() => {});
-    engine.ctx = null;
   }
+  engine.ctx = null;
+  engine.decks = [];
+  engine.playlist = [];
 }
