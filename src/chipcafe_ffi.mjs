@@ -16,7 +16,14 @@ import {
   performancePoints,
   transitionProfile,
 } from "./chipcafe_mix.mjs";
-import { analyseTrack, pickNextByTempo, syncRate, tempoFor } from "./chipcafe_tempo.mjs";
+import {
+  analyseTrack,
+  hasLongMix,
+  keyName,
+  pairCompatibility,
+  pickNextByFit,
+  tempoFor,
+} from "./chipcafe_tempo.mjs";
 
 const TICK_MS = 250;
 const engine = {
@@ -34,6 +41,7 @@ const engine = {
   nextIndex: null,
   previousIndex: null,
   played: new Set(),
+  history: [],
   broken: new Set(),
   analysisRun: 0,
   mixCount: 0,
@@ -120,6 +128,10 @@ function emitTrack(index) {
   if (index !== engine.currentIndex) engine.previousIndex = engine.currentIndex;
   engine.currentIndex = index;
   engine.played.add(index);
+  if (engine.history[engine.history.length - 1] !== index) {
+    engine.history.push(index);
+    if (engine.history.length > 12) engine.history.shift();
+  }
   setPalette(track);
   const callback = engine.onTrack;
   if (typeof callback === "function") {
@@ -407,6 +419,7 @@ async function loadFeed() {
     engine.currentIndex = 0;
     engine.previousIndex = null;
     engine.played = new Set([0]);
+    engine.history = [0];
     engine.broken = new Set();
     engine.errorCount = 0;
     if (engine.recoveryTimer) {
@@ -655,11 +668,10 @@ function mixLockRate(fromIndex, toIndex) {
 }
 
 // The track the DJ plays after fromIndex. The set walks the playlist by
-// tempo: an unplayed track that can be beatmatched wins, closest tempo
-// first, so a synced mix is the normal case and not an accident of feed
-// order. Broken tracks are left out. When nothing can sync (or no beat
-// grid is ready yet), the next unplayed track in feed order plays and the
-// mix falls back to a plain crossfade.
+// pair fit: tempo, musical key, and energy. A track that can share a long
+// overlap wins first. Key fit wins over a small tempo gain. Broken tracks
+// are left out. When no pair fits, the next unplayed track plays and gets
+// a short mix or a clean cut.
 function chooseNextIndex(fromIndex) {
   const length = engine.playlist.length;
   if (length === 0) return 0;
@@ -682,15 +694,34 @@ function chooseNextIndex(fromIndex) {
 
   const fromTempo = trackTempo(fromIndex);
   if (fromTempo) {
-    const candidates = pool.map((index) => {
+    const candidateFor = (index) => {
       const tempo = trackTempo(index);
       return {
         index,
         bpm: tempo ? tempo.bpm : 0,
+        key: tempo ? tempo.key : null,
+        energy: tempo ? tempo.energy : 0,
         lockRate: mixLockRate(fromIndex, index),
       };
-    });
-    const picked = pickNextByTempo(candidates, fromTempo.bpm);
+    };
+    const candidates = pool.map(candidateFor);
+    if (!hasLongMix(candidates, fromTempo)) {
+      // Keep the set inside its matched group. A matched track from four
+      // or more plays ago beats a new track that would clash.
+      const recent = new Set(engine.history.slice(-4));
+      recent.add(fromIndex);
+      const replay = [];
+      for (let index = 0; index < length; index += 1) {
+        if (!recent.has(index) && engine.played.has(index) && !engine.broken.has(index)) {
+          replay.push(candidateFor(index));
+        }
+      }
+      if (hasLongMix(replay, fromTempo)) {
+        const picked = pickNextByFit(replay, fromTempo);
+        if (picked >= 0) return picked;
+      }
+    }
+    const picked = pickNextByFit(candidates, fromTempo);
     if (picked >= 0) return picked;
   }
   return pool[0];
@@ -743,13 +774,37 @@ function planMix(from, targetIndex, kind) {
   // those mixes only sync when the tempos already match.
   const lockRate = mixLockRate(from.index, targetIndex);
   const fromBpm = fromTempo.bpm * fromRate;
-  const rate = syncRate(fromBpm, toTempo.bpm, lockRate);
-  if (!rate) return free;
+  const fit = pairCompatibility(
+    { bpm: fromBpm, key: fromTempo.key, energy: fromTempo.energy },
+    toTempo,
+    lockRate,
+  );
+  if (!fit) return free;
+  const rate = fit.rate;
 
-  // First bar line on the outgoing deck that leaves time to cue.
+  // A pair with a bad or unknown key gets a clean cut on a bar line. It
+  // does not get a long overlap. A close key gets a short mix. Only a
+  // full fit in tempo, key, and energy gets the long performance.
+  const cleanCut = fit.harmonic === null || fit.harmonic > 4;
+  const syncedProfile = cleanCut
+    ? transitionProfile({ synced: true, kind: "cut", sequence: engine.mixCount, lockRate })
+    : transitionProfile({
+        synced: true,
+        kind,
+        sequence: engine.mixCount,
+        lockRate,
+        longMix: fit.longMix,
+      });
+
+  // A long auto mix starts on a sixteen-beat phrase line. Short mixes
+  // and cuts start on the next bar line.
+  const phraseBeats = syncedProfile.performance && kind === "auto" ? 16 : 4;
   const position = from.element.currentTime;
   let beat = Math.ceil((position - fromTempo.offset) / fromTempo.period);
-  while (beat % 4 !== 0 || (fromTempo.offset + beat * fromTempo.period - position) / fromRate < MIX_LEAD) {
+  while (
+    beat % phraseBeats !== 0 ||
+    (fromTempo.offset + beat * fromTempo.period - position) / fromRate < MIX_LEAD
+  ) {
     beat += 1;
   }
   const lead = (fromTempo.offset + beat * fromTempo.period - position) / fromRate;
@@ -762,12 +817,6 @@ function planMix(from, targetIndex, kind) {
     inBeat += 4 * toTempo.period;
     cue = inBeat - lead * rate;
   }
-  const syncedProfile = transitionProfile({
-    synced: true,
-    kind,
-    sequence: engine.mixCount,
-    lockRate,
-  });
   return {
     synced: true,
     style: syncedProfile.style,
@@ -785,6 +834,7 @@ function planMix(from, targetIndex, kind) {
     fromTempo,
     toTempo,
     lockRate,
+    fit,
   };
 }
 
@@ -928,7 +978,7 @@ function scheduleMix(mix, from, to) {
   const delay = (beats) => Math.max(0, (at(beats) - ctx.currentTime) * 1000);
   const { stages } = mix;
 
-  if (mix.kind === "cut") {
+  if (mix.kind === "cut" || mix.style === "cut") {
     scheduleCutMix(mix, from, to, at);
   } else {
     const punchLevel = mix.punchLevel ?? 0.88;
@@ -1159,7 +1209,7 @@ function autoMixSeconds(deck) {
   const tempo = trackTempo(deck.index);
   if (!tempo) return FREE_MIX_OUT_SECONDS + 0.6;
   const beat = tempo.period / (deck.element.playbackRate || 1);
-  return (AUTO_MIX_OUT_BEATS + 4) * beat + MIX_LEAD;
+  return (AUTO_MIX_OUT_BEATS + 20) * beat + MIX_LEAD;
 }
 
 // The status line under the track title. progress is how far the current
@@ -1178,17 +1228,26 @@ function mixStatus() {
     const tempo = trackTempo(deck.index);
     const nextTempo = engine.nextIndex != null ? trackTempo(engine.nextIndex) : undefined;
     if (tempo === undefined || nextTempo === undefined) {
-      return { progress: 0, text: `ANALYSING BEATS FOR THE NEXT MIX · ${when}` };
+      return { progress: 0, text: `ANALYSING TEMPO AND KEY FOR THE NEXT MIX · ${when}` };
     }
     if (tempo && nextTempo) {
-      const rate = syncRate(
-        tempo.bpm * (element.playbackRate || 1),
-        nextTempo.bpm,
+      const fit = pairCompatibility(
+        { bpm: tempo.bpm * (element.playbackRate || 1), key: tempo.key, energy: tempo.energy },
+        nextTempo,
         mixLockRate(deck.index, engine.nextIndex),
       );
-      if (rate) {
+      if (fit) {
         const bpm = Math.round(tempo.bpm * (element.playbackRate || 1));
-        return { progress: 0, text: `NEXT TRACK BEATMATCHED AT ${bpm} BPM · ${when}` };
+        if (fit.longMix) {
+          return {
+            progress: 0,
+            text: `NEXT TRACK MATCHED · ${bpm} BPM · ${keyName(tempo.key)} TO ${keyName(nextTempo.key)} · ${when}`,
+          };
+        }
+        if (fit.harmonic !== null && fit.harmonic <= 4) {
+          return { progress: 0, text: `NEXT TRACK SHORT MIX · KEY CLOSE · ${when}` };
+        }
+        return { progress: 0, text: `NEXT TRACK CLEAN CUT · KEYS DO NOT MATCH · ${when}` };
       }
       return { progress: 0, text: `NO BEAT MATCH FOR THE NEXT TRACK · ${when}` };
     }
@@ -1203,6 +1262,7 @@ function mixStatus() {
   const locked = `BEATS LOCKED AT ${Math.round(mix.bpm)} BPM${tempoChange}`;
   let text;
   if (mix.kind === "cut") text = "MIXING · CUT TO THE NEXT TRACK";
+  else if (mix.style === "cut") text = "MIXING · CLEAN CUT ON THE BAR · KEYS DO NOT MATCH";
   else if (!mix.synced) text = "MIXING · NO BEAT MATCH · SLAM CUT";
   else if (elapsed < 0) text = `MIXING · NEXT TRACK ENTERS EARLY ON THE BEAT · ${locked}`;
   else if (mix.performance && elapsed < mix.stages.tease) text = `MIXING · TEASING THE NEXT TRACK · CUTS IN AND OUT · ${locked}`;
