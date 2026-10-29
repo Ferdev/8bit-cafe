@@ -164,6 +164,201 @@ export function pickNextByTempo(candidates, fromBpm) {
   return best;
 }
 
+// --------------------------------------------------------------------- key
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const KEY_PROFILES = {
+  major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+  minor: [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+};
+const SCALE_INTERVALS = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+};
+
+export function keyName(key) {
+  if (!key) return "";
+  return `${NOTE_NAMES[key.tonic]} ${key.mode.toUpperCase()}`;
+}
+
+function correlation(left, right) {
+  const leftMean = left.reduce((sum, value) => sum + value, 0) / left.length;
+  const rightMean = right.reduce((sum, value) => sum + value, 0) / right.length;
+  let top = 0;
+  let leftSq = 0;
+  let rightSq = 0;
+  for (let i = 0; i < left.length; i += 1) {
+    const a = left[i] - leftMean;
+    const b = right[i] - rightMean;
+    top += a * b;
+    leftSq += a * a;
+    rightSq += b * b;
+  }
+  return leftSq > 0 && rightSq > 0 ? top / Math.sqrt(leftSq * rightSq) : 0;
+}
+
+// Estimates the musical key from decoded mono samples. Each frame gets a
+// chroma vector from Goertzel filters on MIDI notes 36-83. Harmonic
+// weights come down, so a square-wave fifth does not read as a new tonic.
+// The best Krumhansl profile by correlation is the key. Returns null when
+// the sound has too little pitch data.
+export function detectKey(samples, sampleRate) {
+  const frameSize = 8192;
+  const maxSamples = Math.min(samples.length, Math.floor(sampleRate * 75));
+  const chroma = new Float64Array(12);
+  const notes = [];
+  for (let midi = 36; midi <= 83; midi += 1) {
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    notes.push({ midi, coeff: 2 * Math.cos((2 * Math.PI * freq) / sampleRate) });
+  }
+  const window = new Float64Array(frameSize);
+  let frames = 0;
+  for (let start = 0; start + frameSize <= maxSamples; start += frameSize) {
+    let squareSum = 0;
+    for (let i = 0; i < frameSize; i += 1) {
+      const hann = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1));
+      const value = samples[start + i] * hann;
+      window[i] = value;
+      squareSum += samples[start + i] * samples[start + i];
+    }
+    if (Math.sqrt(squareSum / frameSize) < 0.01) continue;
+    frames += 1;
+
+    const magnitudes = new Float64Array(notes.length);
+    for (let n = 0; n < notes.length; n += 1) {
+      const { coeff } = notes[n];
+      let s1 = 0;
+      let s2 = 0;
+      for (let i = 0; i < frameSize; i += 1) {
+        const s0 = window[i] + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+      }
+      const power = Math.max(0, s1 * s1 + s2 * s2 - coeff * s1 * s2);
+      magnitudes[n] = Math.sqrt(power) / frameSize;
+    }
+    for (let n = 0; n < notes.length; n += 1) {
+      let value = magnitudes[n];
+      if (n >= 19) value -= 0.3 * magnitudes[n - 19];
+      if (n >= 28) value -= 0.18 * magnitudes[n - 28];
+      if (n >= 31) value -= 0.12 * magnitudes[n - 31];
+      if (value <= 0) continue;
+      const midi = notes[n].midi;
+      const weight = midi < 48 ? 1.15 : midi > 72 ? 0.75 : 1;
+      chroma[midi % 12] += Math.pow(value, 1.2) * weight;
+    }
+  }
+  const total = chroma.reduce((sum, value) => sum + value, 0);
+  if (frames < 4 || total <= 0) return null;
+  const normalized = Array.from(chroma, (value) => value / total);
+
+  const candidates = [];
+  for (const mode of ["major", "minor"]) {
+    const profile = KEY_PROFILES[mode];
+    for (let tonic = 0; tonic < 12; tonic += 1) {
+      // Correlate in tonic order: rotate the chroma to the tonic.
+      const chromaAtTonic = normalized.map((_, i) => normalized[(i + tonic) % 12]);
+      candidates.push({ tonic, mode, score: correlation(chromaAtTonic, profile) });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || best.score < 0.45) return null;
+  return {
+    tonic: best.tonic,
+    mode: best.mode,
+    confidence: best.score,
+    margin: best.score - (candidates[1] ? candidates[1].score : 0),
+  };
+}
+
+function scalePitchClasses(key) {
+  return new Set(SCALE_INTERVALS[key.mode].map((step) => (key.tonic + step) % 12));
+}
+
+// How many scale notes two keys do not share, counted on both sides.
+// Same key and relative major/minor give 0. A fifth step gives 2. A
+// tritone gives a high count. Null means one key is unknown.
+export function harmonicDistance(left, right) {
+  if (!left || !right) return null;
+  const a = scalePitchClasses(left);
+  const b = scalePitchClasses(right);
+  let distance = 0;
+  for (const note of a) if (!b.has(note)) distance += 1;
+  for (const note of b) if (!a.has(note)) distance += 1;
+  return distance;
+}
+
+// Mean loudness of the decoded head. It gives the DJ a simple guard
+// against a hard jump from a quiet track to a loud one in a long overlap.
+export function trackEnergy(samples) {
+  if (!samples.length) return 0;
+  let squareSum = 0;
+  for (let i = 0; i < samples.length; i += 1) squareSum += samples[i] * samples[i];
+  return Math.sqrt(squareSum / samples.length);
+}
+
+function tempoDistance(fromBpm, toBpm) {
+  const raw = Math.abs(Math.log2(fromBpm / toBpm));
+  return Math.min(raw, Math.abs(raw - 1));
+}
+
+// Full pair fit for two analysed tracks: sync rate, key distance and
+// energy ratio. longMix is true only when all three fit well. Score is
+// low for a good next track. Returns null when the tempos cannot sync.
+export function pairCompatibility(from, to, lockRate = false) {
+  if (!from || !to) return null;
+  const rate = syncRate(from.bpm, to.bpm, lockRate);
+  if (rate === null) return null;
+  const harmonic = harmonicDistance(from.key, to.key);
+  const energyRatio = from.energy > 0 && to.energy > 0 ? to.energy / from.energy : null;
+  const keyConfidence = Math.min(
+    from.key ? from.key.confidence : 0,
+    to.key ? to.key.confidence : 0,
+  );
+  const score =
+    tempoDistance(from.bpm, to.bpm) * 4 +
+    (harmonic === null ? 1.2 : harmonic * 0.28) +
+    (energyRatio === null ? 0.15 : Math.abs(Math.log(energyRatio)) * 0.45);
+  const longMix =
+    harmonic !== null &&
+    harmonic <= 2 &&
+    keyConfidence >= 0.55 &&
+    tempoDistance(from.bpm, to.bpm) <= 0.09 &&
+    (energyRatio === null || (energyRatio >= 0.6 && energyRatio <= 1.7));
+  return { rate, harmonic, energyRatio, keyConfidence, score, longMix };
+}
+
+// True when one candidate can share a long overlap with the current track.
+export function hasLongMix(candidates, from) {
+  return candidates.some((candidate) => {
+    const fit = pairCompatibility(from, candidate, Boolean(candidate.lockRate));
+    return Boolean(fit && fit.longMix);
+  });
+}
+
+// The candidate that fits the current track best as a full pair. A long
+// mix fit wins first. Then key distance wins over a small tempo gain.
+export function pickNextByFit(candidates, from) {
+  let best = -1;
+  let bestRank = null;
+  for (const candidate of candidates) {
+    const fit = pairCompatibility(from, candidate, Boolean(candidate.lockRate));
+    if (!fit) continue;
+    const rank = [fit.longMix ? 0 : 1, fit.harmonic === null ? 99 : fit.harmonic, fit.score];
+    if (
+      !bestRank ||
+      rank[0] < bestRank[0] ||
+      (rank[0] === bestRank[0] && rank[1] < bestRank[1]) ||
+      (rank[0] === bestRank[0] && rank[1] === bestRank[1] && rank[2] < bestRank[2])
+    ) {
+      bestRank = rank;
+      best = candidate.index;
+    }
+  }
+  return best;
+}
+
 async function decodeHead(url) {
   const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const decode = async (data) => {
@@ -191,8 +386,15 @@ export function analyseTrack(id, url) {
   if (cache.has(id)) return cache.get(id).promise;
   const entry = { result: undefined, promise: null };
   entry.promise = decodeHead(url)
-    .then((samples) => detectTempo(onsetEnvelope(samples, ANALYSIS_RATE)))
-    .then((tempo) => (tempo && tempo.confidence > 1.15 ? tempo : null))
+    .then((samples) => {
+      const tempo = detectTempo(onsetEnvelope(samples, ANALYSIS_RATE));
+      if (!tempo || tempo.confidence <= 1.15) return null;
+      return {
+        ...tempo,
+        key: detectKey(samples, ANALYSIS_RATE),
+        energy: trackEnergy(samples),
+      };
+    })
     .catch(() => null)
     .then((tempo) => {
       entry.result = tempo;
