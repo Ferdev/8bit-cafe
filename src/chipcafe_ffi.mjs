@@ -1,5 +1,5 @@
 // 8bit.cafe: one auto-DJ channel fed by the latest chiptune on Audius and Jamendo,
-// streamed through two decks with beatmatched crossfades, plus a pixel-art VJ
+// streamed through two decks with beatmatched punch-in mixes, plus a pixel-art VJ
 // (see chipcafe_art.mjs) that dances to the live signal.
 
 import {
@@ -8,6 +8,13 @@ import {
   drawFrame,
   setAccents,
 } from "./chipcafe_art.mjs";
+import {
+  AUTO_MIX_OUT_BEATS,
+  FREE_MIX_OUT_SECONDS,
+  loopOutLevel,
+  loopOutSteps,
+  transitionProfile,
+} from "./chipcafe_mix.mjs";
 import { analyseTrack, pickNextByTempo, syncRate, tempoFor } from "./chipcafe_tempo.mjs";
 
 const TICK_MS = 250;
@@ -28,6 +35,7 @@ const engine = {
   played: new Set(),
   broken: new Set(),
   analysisRun: 0,
+  mixCount: 0,
   retried: false,
   errorCount: 0,
   recoveryTimer: null,
@@ -465,15 +473,11 @@ function ensureAudio() {
   engine.master = master;
 }
 
-// Mix shapes. Synced mixes count in beats of the outgoing deck; free mixes
-// (no reliable beat grid on one side) count in seconds.
+// Transition shapes live in chipcafe_mix.mjs. Synced mixes count in beats
+// of the outgoing deck; free mixes count in seconds.
 const BASS_CUT_DB = -26;
 const MIX_LEAD = 0.6;
-const AUTO_BEATS = { in: 8, swap: 16, out: 32 };
-const QUICK_BEATS = { in: 4, swap: 8, out: 16 };
-const AUTO_FREE = { in: 4, swap: 7, out: 11 };
-const QUICK_FREE = { in: 2, swap: 3.5, out: 6 };
-const CUT = { in: 0.35, swap: 0.2, out: 0.45 };
+const TONE_OPEN_HZ = 18000;
 
 function ensureDecks() {
   if (engine.decks.length > 0) return;
@@ -487,25 +491,62 @@ function ensureDecks() {
     element.style.display = "none";
     document.body.appendChild(element);
 
-    // source -> bass shelf (for the bass swap) -> high-pass (for the
-    // outgoing sweep) -> channel fader -> mix bus.
+    // source -> bass shelf -> low-pass tone -> high-pass sweep -> fader ->
+    // mix bus. A pre-fader echo send lets an outgoing deck ring after its
+    // fader drops.
     const source = ctx.createMediaElementSource(element);
     const low = ctx.createBiquadFilter();
     low.type = "lowshelf";
     low.frequency.value = 220;
     low.gain.value = 0;
+    const tone = ctx.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = TONE_OPEN_HZ;
+    tone.Q.value = 0.7;
     const sweep = ctx.createBiquadFilter();
     sweep.type = "highpass";
     sweep.frequency.value = 20;
     sweep.Q.value = 0.9;
     const gain = ctx.createGain();
     gain.gain.value = index === 0 ? 1 : 0;
+    const echoSend = ctx.createGain();
+    echoSend.gain.value = 0;
+    const echo = ctx.createDelay(2);
+    echo.delayTime.value = 0.375;
+    const echoFeedback = ctx.createGain();
+    echoFeedback.gain.value = 0.34;
+    const echoFilter = ctx.createBiquadFilter();
+    echoFilter.type = "lowpass";
+    echoFilter.frequency.value = 3200;
+    echoFilter.Q.value = 0.7;
+    const echoWet = ctx.createGain();
+    echoWet.gain.value = 0;
     source.connect(low);
-    low.connect(sweep);
+    low.connect(tone);
+    tone.connect(sweep);
     sweep.connect(gain);
     gain.connect(engine.mixBus);
+    sweep.connect(echoSend);
+    echoSend.connect(echo);
+    echo.connect(echoFeedback);
+    echoFeedback.connect(echo);
+    echo.connect(echoFilter);
+    echoFilter.connect(echoWet);
+    echoWet.connect(engine.mixBus);
 
-    const deck = { element, gain, low, sweep, index: null, rate: 1 };
+    const deck = {
+      element,
+      gain,
+      low,
+      tone,
+      sweep,
+      echoSend,
+      echo,
+      echoFeedback,
+      echoWet,
+      index: null,
+      rate: 1,
+    };
     element.addEventListener("ended", () => {
       const mix = engine.mix;
       if (mix && engine.decks[mix.fromDeck] === deck) {
@@ -592,7 +633,11 @@ function holdParam(param, value) {
 function resetDeck(deck, level) {
   holdParam(deck.gain.gain, level);
   holdParam(deck.low.gain, 0);
+  if (deck.tone) holdParam(deck.tone.frequency, TONE_OPEN_HZ);
   holdParam(deck.sweep.frequency, 20);
+  if (deck.echoSend) holdParam(deck.echoSend.gain, 0);
+  if (deck.echoWet) holdParam(deck.echoWet.gain, 0);
+  if (deck.echoFeedback) holdParam(deck.echoFeedback.gain, 0.34);
 }
 
 function trackTempo(trackIndex) {
@@ -672,14 +717,22 @@ function planMix(from, targetIndex, kind) {
   const fromRate = from.element.playbackRate || 1;
   const fromTempo = trackTempo(from.index);
   const toTempo = trackTempo(targetIndex);
+  const freeProfile = transitionProfile({
+    synced: false,
+    kind,
+    sequence: engine.mixCount,
+  });
   const free = {
     synced: false,
+    style: freeProfile.style,
+    exit: freeProfile.exit,
+    punchLevel: freeProfile.punchLevel,
     rate: 1,
     cue: 0,
     beat: 1,
     startCtx: nowCtx + 0.15,
     startPerf: nowPerf + 0.15,
-    stages: kind === "cut" ? CUT : kind === "quick" ? QUICK_FREE : AUTO_FREE,
+    stages: freeProfile.stages,
     bpm: toTempo ? toTempo.bpm : 0,
   };
   if (kind === "cut" || !fromTempo || !toTempo) return free;
@@ -707,15 +760,24 @@ function planMix(from, targetIndex, kind) {
     inBeat += 4 * toTempo.period;
     cue = inBeat - lead * rate;
   }
+  const syncedProfile = transitionProfile({
+    synced: true,
+    kind,
+    sequence: engine.mixCount,
+    lockRate,
+  });
   return {
     synced: true,
+    style: syncedProfile.style,
+    exit: syncedProfile.exit,
+    punchLevel: syncedProfile.punchLevel,
     rate,
     cue,
     inBeat,
     beat: fromTempo.period / fromRate,
     startCtx: nowCtx + lead,
     startPerf: nowPerf + lead,
-    stages: kind === "quick" ? QUICK_BEATS : AUTO_BEATS,
+    stages: syncedProfile.stages,
     bpm: fromBpm,
     fromTempo,
     toTempo,
@@ -741,6 +803,7 @@ function startMix(targetIndex, kind) {
   loadDeck(toDeck, target);
   resetDeck(to, 0);
   const plan = planMix(from, target, kind);
+  engine.mixCount += 1;
   to.rate = plan.rate;
   to.element.playbackRate = plan.rate;
   try {
@@ -777,38 +840,152 @@ function startMix(targetIndex, kind) {
     });
 }
 
-function scheduleMix(mix, from, to) {
-  const ctx = engine.ctx;
-  const now = ctx.currentTime;
-  const at = (beats) => Math.max(now, mix.startCtx + beats * mix.beat);
+function scheduleEchoOut(mix, from, at) {
+  if (!from.echoSend || !from.echo || !from.echoFeedback || !from.echoWet) return;
   const { stages } = mix;
-  const bass = mix.kind !== "cut";
+  const delaySeconds = mix.synced ? clamp(mix.beat * 0.75, 0.08, 1.5) : 0.375;
+  holdParam(from.echo.delayTime, delaySeconds);
+  holdParam(from.echoFeedback.gain, 0.36);
 
-  // Incoming: fade up with the bass shelved off, then take the bass back.
+  // Capture the final beat before the bass swap. Close the send after the
+  // drop, so only the feedback tail remains under the new track.
+  holdParam(from.echoSend.gain, 0);
+  from.echoSend.gain.setValueAtTime(0, at(Math.max(0, stages.swap - 1)));
+  from.echoSend.gain.linearRampToValueAtTime(0.6, at(stages.swap));
+  from.echoSend.gain.setValueAtTime(0.6, at(stages.swap + 0.75));
+  from.echoSend.gain.linearRampToValueAtTime(0, at(stages.drop));
+
+  holdParam(from.echoWet.gain, 0);
+  from.echoWet.gain.setValueAtTime(0, at(Math.max(0, stages.swap - 1)));
+  from.echoWet.gain.linearRampToValueAtTime(0.48, at(stages.swap));
+  from.echoWet.gain.setValueAtTime(0.48, at(Math.max(stages.swap, stages.out - 1)));
+  from.echoWet.gain.linearRampToValueAtTime(0, at(stages.out));
+}
+
+function loopOutSeek(mix, step) {
+  if (engine.mix !== mix || mix.exit !== "loop" || !mix.fromTempo) return;
+  const from = engine.decks[mix.fromDeck];
+  if (!from || !Number.isFinite(from.element.currentTime)) return;
+  if (step.capture || mix.loopStart == null) {
+    const { offset, period } = mix.fromTempo;
+    const beatIndex = Math.floor((from.element.currentTime - offset) / period);
+    mix.loopStart = Math.max(0, offset + beatIndex * period);
+    if (step.capture) return;
+  }
+  try {
+    from.element.currentTime = mix.loopStart + step.point * mix.fromTempo.period;
+  } catch (_error) {
+    // A seek can fail while the browser swaps buffers. The fader and
+    // filters still end the old deck on schedule.
+  }
+}
+
+function scheduleLoopOut(mix, from, level, at, delay) {
+  const { stages } = mix;
+  holdParam(from.gain.gain, level);
+  for (let beat = stages.swap; beat < stages.out; beat += 1) {
+    from.gain.gain.setValueAtTime(level * loopOutLevel(stages, beat), at(beat));
+  }
+  from.gain.gain.setValueAtTime(
+    level * loopOutLevel(stages, Math.max(stages.swap, stages.out - 0.03)),
+    at(Math.max(stages.swap, stages.out - 0.03)),
+  );
+  from.gain.gain.linearRampToValueAtTime(0, at(stages.out));
+  for (const step of loopOutSteps(stages)) {
+    mix.timers.push(setTimeout(() => loopOutSeek(mix, step), delay(step.at)));
+  }
+}
+
+function scheduleCutMix(mix, from, to, at) {
+  const { stages } = mix;
   holdParam(to.gain.gain, 0);
   to.gain.gain.setValueAtTime(0, at(0));
   to.gain.gain.linearRampToValueAtTime(1, at(stages.in));
-  if (bass) {
-    holdParam(to.low.gain, BASS_CUT_DB);
-    to.low.gain.setValueAtTime(BASS_CUT_DB, at(stages.swap - 0.5));
-    to.low.gain.linearRampToValueAtTime(0, at(stages.swap));
-  }
 
-  // Outgoing: give up the bass at the swap, then sweep up and fade out.
   const level = Math.max(from.gain.gain.value, 0.0001);
   holdParam(from.gain.gain, level);
   from.gain.gain.setValueAtTime(level, at(stages.swap));
   from.gain.gain.linearRampToValueAtTime(0, at(stages.out));
-  if (bass) {
+}
+
+function scheduleMix(mix, from, to) {
+  const ctx = engine.ctx;
+  const now = ctx.currentTime;
+  const at = (beats) => Math.max(now + (beats + 2) * 0.0005, mix.startCtx + beats * mix.beat);
+  const delay = (beats) => Math.max(0, (at(beats) - ctx.currentTime) * 1000);
+  const { stages } = mix;
+
+  if (mix.kind === "cut") {
+    scheduleCutMix(mix, from, to, at);
+  } else {
+    const punchLevel = mix.punchLevel ?? 0.88;
+
+    // Incoming: reach punch level on the downbeat, with its bass shelved
+    // off. Its low-pass opens to the bass swap, then it reaches full level.
+    holdParam(to.gain.gain, 0);
+    to.gain.gain.setValueAtTime(0, at(-stages.in));
+    to.gain.gain.linearRampToValueAtTime(punchLevel, at(0));
+    to.gain.gain.setValueAtTime(punchLevel, at(stages.swap));
+    to.gain.gain.linearRampToValueAtTime(1, at(Math.min(stages.out, stages.swap + 0.15)));
+    if (to.tone) {
+      holdParam(to.tone.frequency, 1400);
+      to.tone.frequency.setValueAtTime(1400, at(-stages.in));
+      to.tone.frequency.exponentialRampToValueAtTime(7000, at(stages.swap));
+      to.tone.frequency.exponentialRampToValueAtTime(
+        TONE_OPEN_HZ,
+        at(Math.min(stages.out, stages.swap + 1)),
+      );
+    }
+
+    // Change the bass in a short click-safe move on the bar line.
+    const bassEdge = 0.04;
+    holdParam(to.low.gain, BASS_CUT_DB);
+    to.low.gain.setValueAtTime(BASS_CUT_DB, at(stages.swap - bassEdge));
+    to.low.gain.linearRampToValueAtTime(0, at(stages.swap + bassEdge));
     holdParam(from.low.gain, 0);
-    from.low.gain.setValueAtTime(0, at(stages.swap - 0.5));
-    from.low.gain.linearRampToValueAtTime(BASS_CUT_DB, at(stages.swap));
+    from.low.gain.setValueAtTime(0, at(stages.swap - bassEdge));
+    from.low.gain.linearRampToValueAtTime(BASS_CUT_DB, at(stages.swap + bassEdge));
+
+    // Outgoing filters move with the chosen exit. The old deck does not
+    // sit under the new one as a long, plain crossfade.
     holdParam(from.sweep.frequency, 20);
     from.sweep.frequency.setValueAtTime(20, at(stages.swap));
-    from.sweep.frequency.exponentialRampToValueAtTime(900, at(stages.out));
+    if (from.tone) {
+      holdParam(from.tone.frequency, TONE_OPEN_HZ);
+      from.tone.frequency.setValueAtTime(TONE_OPEN_HZ, at(stages.swap));
+    }
+    if (mix.exit === "echo") {
+      from.sweep.frequency.exponentialRampToValueAtTime(250, at(stages.drop));
+      if (from.tone) from.tone.frequency.exponentialRampToValueAtTime(4200, at(stages.drop));
+    } else if (mix.exit === "loop") {
+      from.sweep.frequency.exponentialRampToValueAtTime(900, at(stages.out));
+      if (from.tone) from.tone.frequency.exponentialRampToValueAtTime(1300, at(stages.out));
+    } else {
+      from.sweep.frequency.exponentialRampToValueAtTime(650, at(stages.drop));
+      from.sweep.frequency.exponentialRampToValueAtTime(1000, at(stages.out));
+      if (from.tone) {
+        from.tone.frequency.exponentialRampToValueAtTime(1800, at(stages.drop));
+        from.tone.frequency.exponentialRampToValueAtTime(900, at(stages.out));
+      }
+    }
+
+    const level = Math.max(from.gain.gain.value, 0.0001);
+    if (mix.exit === "loop") {
+      scheduleLoopOut(mix, from, level, at, delay);
+    } else if (mix.exit === "echo") {
+      holdParam(from.gain.gain, level);
+      from.gain.gain.setValueAtTime(level, at(stages.swap));
+      from.gain.gain.exponentialRampToValueAtTime(Math.max(level * 0.04, 0.0001), at(stages.drop));
+      from.gain.gain.linearRampToValueAtTime(0, at(Math.min(stages.out, stages.drop + 0.5)));
+      scheduleEchoOut(mix, from, at);
+    } else {
+      holdParam(from.gain.gain, level);
+      from.gain.gain.setValueAtTime(level, at(stages.swap));
+      from.gain.gain.exponentialRampToValueAtTime(Math.max(level * 0.08, 0.0001), at(stages.drop));
+      from.gain.gain.linearRampToValueAtTime(0, at(Math.min(stages.out, stages.drop + 1)));
+    }
   }
 
-  const delay = (beats) => Math.max(0, (at(beats) - ctx.currentTime) * 1000);
   mix.timers.push(setTimeout(() => swapDecks(mix), delay(stages.swap)));
   mix.timers.push(setTimeout(() => finishMix(mix), delay(stages.out) + 120));
 }
@@ -854,7 +1031,7 @@ function abortMix(mix) {
 // Keeps the incoming deck on the outgoing grid during a synced mix, the way
 // a DJ nudges a platter.
 function nudgeMix(mix) {
-  if (!mix.synced || mix.lockRate) return;
+  if (!mix.synced || mix.lockRate || mix.swapped) return;
   const from = engine.decks[mix.fromDeck];
   const to = engine.decks[mix.toDeck];
   const fromRate = from.element.playbackRate || 1;
@@ -945,9 +1122,9 @@ function doSeek(seconds) {
 // Seconds the next automatic mix will take, from the current deck's grid.
 function autoMixSeconds(deck) {
   const tempo = trackTempo(deck.index);
-  if (!tempo) return AUTO_FREE.out + 0.6;
+  if (!tempo) return FREE_MIX_OUT_SECONDS + 0.6;
   const beat = tempo.period / (deck.element.playbackRate || 1);
-  return (AUTO_BEATS.out + 4) * beat + MIX_LEAD;
+  return (AUTO_MIX_OUT_BEATS + 4) * beat + MIX_LEAD;
 }
 
 // The status line under the track title. progress is how far the current
@@ -991,12 +1168,13 @@ function mixStatus() {
   const locked = `BEATS LOCKED AT ${Math.round(mix.bpm)} BPM${tempoChange}`;
   let text;
   if (mix.kind === "cut") text = "MIXING · CUT TO THE NEXT TRACK";
-  else if (!mix.synced) text = "MIXING · NO BEAT MATCH · CROSSFADE";
-  else if (elapsed < 0) text = `MIXING · NEXT TRACK STARTS ON THE BEAT · ${locked}`;
-  else if (elapsed < mix.stages.in) text = `MIXING · NEW TRACK IN, ITS BASS HELD BACK · ${locked}`;
-  else if (elapsed < mix.stages.swap - 0.5) text = `MIXING · BOTH TRACKS TOGETHER · ${locked}`;
-  else if (elapsed < mix.stages.swap + 2) text = "MIXING · BASS MOVES TO THE NEW TRACK";
-  else text = "MIXING · OLD TRACK FADES OUT";
+  else if (!mix.synced) text = "MIXING · NO BEAT MATCH · SLAM CUT";
+  else if (elapsed < 0) text = `MIXING · NEXT TRACK PUNCHES IN ON THE BEAT · ${locked}`;
+  else if (elapsed < mix.stages.swap - 0.5) text = `MIXING · PUNCH IN · NEW BASS HELD BACK · ${locked}`;
+  else if (elapsed < mix.stages.swap + 0.5) text = "MIXING · BASS SWAP ON THE BAR";
+  else if (mix.exit === "echo") text = "MIXING · ECHO OUT · OLD TRACK TAIL IN TIME";
+  else if (mix.exit === "loop") text = "MIXING · LOOP OUT · OLD BEAT REPEATS";
+  else text = "MIXING · FILTER DROP · OLD TRACK OUT";
   return { progress, text };
 }
 
