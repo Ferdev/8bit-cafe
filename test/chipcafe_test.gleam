@@ -45,3 +45,11 @@ pub fn stream_status_labels_test() {
   assert chipcafe.status_label(chipcafe.Blocked) == "SOUND LOCKED"
   assert chipcafe.status_label(chipcafe.Failed) == "SIGNAL LOST"
 }
+
+pub fn seek_target_is_clamped_to_the_track_test() {
+  assert chipcafe.seek_seconds("42", 180) == 42
+  assert chipcafe.seek_seconds("0", 180) == 0
+  assert chipcafe.seek_seconds("-5", 180) == 0
+  assert chipcafe.seek_seconds("400", 180) == 180
+  assert chipcafe.seek_seconds("not a number", 180) == 0
+}
