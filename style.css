@@ -290,50 +290,45 @@ canvas {
   outline: none;
 }
 
-/* Crossfader strip: shows which deck is on air and how the blend moves. */
+/* Auto-DJ status readout: label, mix-progress bar and status text. */
 .mixer {
   margin-top: 18px;
 }
 
-.mixer-row {
+.mixer-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.mixer-deck {
+.mixer-label {
   font-family: var(--font-head);
-  font-size: 9px;
-  width: 26px;
-  padding: 5px 0;
-  text-align: center;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--ink);
+}
+
+.mixer-note {
+  font-family: var(--font-head);
+  font-size: 6px;
+  letter-spacing: 1px;
   color: var(--dim);
+}
+
+.mixer-track {
+  height: 8px;
+  margin-top: 8px;
+  background: rgba(6, 4, 14, 0.9);
   border: 2px solid rgba(232, 228, 255, 0.25);
 }
 
-.mixer-deck.is-on {
-  color: var(--bg);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.xfader {
-  position: relative;
-  flex: 1;
-  height: 4px;
-  background: rgba(232, 228, 255, 0.25);
-}
-
-.xfader-knob {
-  position: absolute;
-  top: 50%;
-  width: 12px;
-  height: 18px;
-  background: var(--ink);
-  border: 2px solid var(--bg);
-  box-shadow: 0 0 0 2px var(--accent-alt);
-  transform: translate(-50%, -50%);
-  transition: left 0.25s linear;
+.mixer-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+  transition: width 0.25s linear;
 }
 
 .mixer-status {
@@ -694,7 +689,7 @@ canvas {
     animation: none;
   }
 
-  .xfader-knob {
+  .mixer-fill {
     transition: none;
   }
 }
