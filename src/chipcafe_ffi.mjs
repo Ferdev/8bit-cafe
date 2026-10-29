@@ -8,7 +8,7 @@ import {
   drawFrame,
   setAccents,
 } from "./chipcafe_art.mjs";
-import { analyseTrack, tempoFor } from "./chipcafe_tempo.mjs";
+import { analyseTrack, pickNextByTempo, syncRate, tempoFor } from "./chipcafe_tempo.mjs";
 
 const TICK_MS = 250;
 const engine = {
@@ -23,6 +23,11 @@ const engine = {
   mix: null,
   playlist: [],
   currentIndex: 0,
+  nextIndex: null,
+  previousIndex: null,
+  played: new Set(),
+  broken: new Set(),
+  analysisRun: 0,
   retried: false,
   errorCount: 0,
   recoveryTimer: null,
@@ -100,8 +105,12 @@ function emitProgress(position, duration) {
 function emitTrack(index) {
   const track = engine.playlist[index];
   if (!track) return;
-  const next = engine.playlist[(index + 1) % engine.playlist.length];
+  const next = engine.nextIndex != null && engine.playlist[engine.nextIndex]
+    ? engine.playlist[engine.nextIndex]
+    : engine.playlist[(index + 1) % engine.playlist.length];
+  if (index !== engine.currentIndex) engine.previousIndex = engine.currentIndex;
   engine.currentIndex = index;
+  engine.played.add(index);
   setPalette(track);
   const callback = engine.onTrack;
   if (typeof callback === "function") {
@@ -387,14 +396,19 @@ async function loadFeed() {
     engine.playlist = playlist;
     engine.retried = false;
     engine.currentIndex = 0;
+    engine.previousIndex = null;
+    engine.played = new Set([0]);
+    engine.broken = new Set();
     engine.errorCount = 0;
     if (engine.recoveryTimer) {
       clearTimeout(engine.recoveryTimer);
       engine.recoveryTimer = null;
     }
 
+    analysePlaylist();
+    engine.nextIndex = chooseNextIndex(0);
     loadDeck(0, 0);
-    loadDeck(1, 1 % playlist.length);
+    loadDeck(1, engine.nextIndex);
     engine.decks[0].gain.gain.value = 1;
     engine.decks[1].gain.gain.value = 0;
 
@@ -460,7 +474,6 @@ const QUICK_BEATS = { in: 4, swap: 8, out: 16 };
 const AUTO_FREE = { in: 4, swap: 7, out: 11 };
 const QUICK_FREE = { in: 2, swap: 3.5, out: 6 };
 const CUT = { in: 0.35, swap: 0.2, out: 0.45 };
-const DECK_NAMES = ["A", "B"];
 
 function ensureDecks() {
   if (engine.decks.length > 0) return;
@@ -498,10 +511,11 @@ function ensureDecks() {
       if (mix && engine.decks[mix.fromDeck] === deck) {
         finishMix(mix);
       } else if (!mix && engine.decks[engine.active] === deck && !engine.switching) {
-        startMix(engine.currentIndex + 1, "cut");
+        startMix(engine.nextIndex ?? engine.currentIndex + 1, "cut");
       }
     });
     element.addEventListener("error", () => {
+      if (deck.index != null) engine.broken.add(deck.index);
       const mix = engine.mix;
       if (mix && engine.decks[mix.toDeck] === deck) {
         abortMix(mix);
@@ -586,6 +600,70 @@ function trackTempo(trackIndex) {
   return track ? tempoFor(track.id) : undefined;
 }
 
+// True when either side of a mix has a "no derivatives" license, so neither
+// track may be time-stretched.
+function mixLockRate(fromIndex, toIndex) {
+  const fromTrack = engine.playlist[fromIndex];
+  const toTrack = engine.playlist[toIndex];
+  return Boolean((fromTrack && fromTrack.no_derivs) || (toTrack && toTrack.no_derivs));
+}
+
+// The track the DJ plays after fromIndex. The set walks the playlist by
+// tempo: an unplayed track that can be beatmatched wins, closest tempo
+// first, so a synced mix is the normal case and not an accident of feed
+// order. Broken tracks are left out. When nothing can sync (or no beat
+// grid is ready yet), the next unplayed track in feed order plays and the
+// mix falls back to a plain crossfade.
+function chooseNextIndex(fromIndex) {
+  const length = engine.playlist.length;
+  if (length === 0) return 0;
+  if (length === 1) return fromIndex;
+  const poolFrom = (played) => {
+    const pool = [];
+    for (let step = 1; step < length; step += 1) {
+      const index = (fromIndex + step) % length;
+      if (!played.has(index) && !engine.broken.has(index)) pool.push(index);
+    }
+    return pool;
+  };
+  let pool = poolFrom(engine.played);
+  if (pool.length === 0) {
+    // A full cycle is done: start a new one from the current track.
+    engine.played = new Set([fromIndex]);
+    pool = poolFrom(engine.played);
+  }
+  if (pool.length === 0) return (fromIndex + 1) % length;
+
+  const fromTempo = trackTempo(fromIndex);
+  if (fromTempo) {
+    const candidates = pool.map((index) => {
+      const tempo = trackTempo(index);
+      return {
+        index,
+        bpm: tempo ? tempo.bpm : 0,
+        lockRate: mixLockRate(fromIndex, index),
+      };
+    });
+    const picked = pickNextByTempo(candidates, fromTempo.bpm);
+    if (picked >= 0) return picked;
+  }
+  return pool[0];
+}
+
+// Analyse the whole playlist in the background, one track at a time, so
+// beat grids are ready long before each mix. loadDeck starts the same
+// cached analysis for the two tracks on the decks.
+function analysePlaylist() {
+  const run = engine.analysisRun + 1;
+  engine.analysisRun = run;
+  (async () => {
+    for (const track of engine.playlist) {
+      if (run !== engine.analysisRun) return;
+      await analyseTrack(track.id, track.audio_url);
+    }
+  })();
+}
+
 // Works out when and how the incoming deck enters: tempo ratio, cue point
 // and the moment of the first shared downbeat.
 function planMix(from, targetIndex, kind) {
@@ -608,20 +686,10 @@ function planMix(from, targetIndex, kind) {
 
   // "No derivatives" licenses rule out time-stretching either track, so
   // those mixes only sync when the tempos already match.
-  const fromTrack = engine.playlist[from.index];
-  const toTrack = engine.playlist[targetIndex];
-  const lockRate = Boolean((fromTrack && fromTrack.no_derivs) || (toTrack && toTrack.no_derivs));
-  const range = lockRate ? 0.004 : 0.08;
+  const lockRate = mixLockRate(from.index, targetIndex);
   const fromBpm = fromTempo.bpm * fromRate;
-  let rate = 0;
-  for (const multiple of [1, 2, 0.5]) {
-    const candidate = fromBpm / (toTempo.bpm * multiple);
-    if (Math.abs(candidate - 1) < range && (!rate || Math.abs(candidate - 1) < Math.abs(rate - 1))) {
-      rate = candidate;
-    }
-  }
+  const rate = syncRate(fromBpm, toTempo.bpm, lockRate);
   if (!rate) return free;
-  if (lockRate) rate = 1;
 
   // First bar line on the outgoing deck that leaves time to cue.
   const position = from.element.currentTime;
@@ -702,6 +770,7 @@ function startMix(targetIndex, kind) {
       if (error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
         emitState("blocked", false);
       } else {
+        engine.broken.add(target);
         engine.currentIndex = target;
         skipBrokenTrack();
       }
@@ -748,6 +817,9 @@ function swapDecks(mix) {
   if (engine.mix !== mix || mix.swapped) return;
   mix.swapped = true;
   engine.active = mix.toDeck;
+  // Choose the following track now, while this one starts, so the "up
+  // next" display and the deck that frees up at the end of the mix agree.
+  engine.nextIndex = chooseNextIndex(mix.target);
   emitTrack(mix.target);
 }
 
@@ -763,7 +835,7 @@ function finishMix(mix) {
   from.rate = 1;
   from.element.playbackRate = 1;
   engine.mix = null;
-  loadDeck(mix.fromDeck, (mix.target + 1) % engine.playlist.length);
+  loadDeck(mix.fromDeck, engine.nextIndex ?? (mix.target + 1) % engine.playlist.length);
   emitMix();
 }
 
@@ -812,7 +884,9 @@ function skipBrokenTrack() {
     scheduleRecovery();
     return;
   }
-  startMix(engine.currentIndex + 1, "cut");
+  // Pick again: the cued track may be the broken one.
+  engine.nextIndex = chooseNextIndex(engine.currentIndex);
+  startMix(engine.nextIndex, "cut");
 }
 
 function doTogglePlayback() {
@@ -847,13 +921,14 @@ function doNextTrack() {
     finishMix(engine.mix);
     return;
   }
-  startMix(engine.currentIndex + 1, "quick");
+  startMix(engine.nextIndex ?? engine.currentIndex + 1, "quick");
 }
 
 function doPreviousTrack() {
   if (engine.playlist.length === 0) return;
   if (engine.mix) finishMix(engine.mix);
-  startMix(engine.currentIndex - 1, "cut");
+  const target = engine.previousIndex != null ? engine.previousIndex : engine.currentIndex - 1;
+  startMix(target, "cut");
 }
 
 function doSeek(seconds) {
@@ -875,39 +950,54 @@ function autoMixSeconds(deck) {
   return (AUTO_BEATS.out + 4) * beat + MIX_LEAD;
 }
 
+// The status line under the track title. progress is how far the current
+// mix has run (0 when no mix runs); the text says in plain words what the
+// auto-DJ does now and what it does next.
 function mixStatus() {
   const mix = engine.mix;
   const deck = engine.decks[engine.active];
   if (!mix) {
-    const tempo = deck ? trackTempo(deck.index) : undefined;
-    const name = DECK_NAMES[engine.active];
-    if (!deck || deck.element.paused) return { fader: engine.active * 100, text: `DECK ${name} PAUSED` };
+    if (!deck || deck.element.paused) return { progress: 0, text: "PAUSED" };
     const element = deck.element;
     const left = Number.isFinite(element.duration)
       ? (element.duration - element.currentTime) / (element.playbackRate || 1) - autoMixSeconds(deck) - 2
       : 0;
-    const grid = tempo === undefined ? "READING THE BEAT GRID" : tempo ? "BEAT GRID LOCKED" : "NO CLEAR BEAT";
-    const when = left > 0 ? `NEXT MIX IN ${formatClock(left)}` : "MIX COMING UP";
-    return { fader: engine.active * 100, text: `DECK ${name} ON AIR · ${grid} · ${when}` };
+    const when = left > 0 ? `NEXT MIX IN ${formatClock(left)}` : "NEXT MIX SOON";
+    const tempo = trackTempo(deck.index);
+    const nextTempo = engine.nextIndex != null ? trackTempo(engine.nextIndex) : undefined;
+    if (tempo === undefined || nextTempo === undefined) {
+      return { progress: 0, text: `ANALYSING BEATS FOR THE NEXT MIX · ${when}` };
+    }
+    if (tempo && nextTempo) {
+      const rate = syncRate(
+        tempo.bpm * (element.playbackRate || 1),
+        nextTempo.bpm,
+        mixLockRate(deck.index, engine.nextIndex),
+      );
+      if (rate) {
+        const bpm = Math.round(tempo.bpm * (element.playbackRate || 1));
+        return { progress: 0, text: `NEXT TRACK BEATMATCHED AT ${bpm} BPM · ${when}` };
+      }
+      return { progress: 0, text: `NO BEAT MATCH FOR THE NEXT TRACK · ${when}` };
+    }
+    return { progress: 0, text: `NO CLEAR BEAT · ${when}` };
   }
 
-  const from = DECK_NAMES[mix.fromDeck];
-  const to = DECK_NAMES[mix.toDeck];
   const elapsed = (engine.ctx.currentTime - mix.startCtx) / mix.beat;
-  const share = clamp(elapsed / mix.stages.out, 0, 1);
-  const fader = Math.round((mix.fromDeck + (mix.toDeck - mix.fromDeck) * share) * 100);
+  const progress = Math.round(clamp(elapsed / mix.stages.out, 0, 1) * 100);
   const tempoChange = mix.synced && Math.abs(mix.rate - 1) > 0.001
     ? ` · TEMPO ${mix.rate > 1 ? "+" : ""}${((mix.rate - 1) * 100).toFixed(1)}%`
     : "";
-  const sync = mix.synced ? `SYNCED ${Math.round(mix.bpm)} BPM${tempoChange}` : "NO SHARED GRID · FREE BLEND";
+  const locked = `BEATS LOCKED AT ${Math.round(mix.bpm)} BPM${tempoChange}`;
   let text;
-  if (mix.kind === "cut") text = `CUT TO DECK ${to}`;
-  else if (elapsed < 0) text = `DECK ${to} CUED ON THE NEXT BAR · ${sync}`;
-  else if (elapsed < mix.stages.in) text = `DECK ${to} FADING IN · BASS CUT · ${sync}`;
-  else if (elapsed < mix.stages.swap - 0.5) text = `${from} + ${to} IN THE MIX · ${sync}`;
-  else if (elapsed < mix.stages.swap + (mix.synced ? 2 : 1)) text = `BASS SWAP · ${from} → ${to}`;
-  else text = `DECK ${from} OUT · FILTER SWEEP`;
-  return { fader, text };
+  if (mix.kind === "cut") text = "MIXING · CUT TO THE NEXT TRACK";
+  else if (!mix.synced) text = "MIXING · NO BEAT MATCH · CROSSFADE";
+  else if (elapsed < 0) text = `MIXING · NEXT TRACK STARTS ON THE BEAT · ${locked}`;
+  else if (elapsed < mix.stages.in) text = `MIXING · NEW TRACK IN, ITS BASS HELD BACK · ${locked}`;
+  else if (elapsed < mix.stages.swap - 0.5) text = `MIXING · BOTH TRACKS TOGETHER · ${locked}`;
+  else if (elapsed < mix.stages.swap + 2) text = "MIXING · BASS MOVES TO THE NEW TRACK";
+  else text = "MIXING · OLD TRACK FADES OUT";
+  return { progress, text };
 }
 
 function formatClock(seconds) {
@@ -922,11 +1012,11 @@ function emitMix() {
   const deck = engine.decks[engine.active];
   const tempo = deck ? trackTempo(deck.index) : undefined;
   const bpm = tempo ? `${Math.round(tempo.bpm * (deck.element.playbackRate || 1))} BPM` : "";
-  const key = `${status.fader}|${status.text}|${bpm}`;
+  const key = `${status.progress}|${status.text}|${bpm}`;
   if (key === engine.lastMix) return;
   engine.lastMix = key;
   try {
-    callback(status.fader, status.text, bpm);
+    callback(status.progress, status.text, bpm);
   } catch (_error) {
     // Ignore a callback racing with a reload.
   }
@@ -963,8 +1053,16 @@ function tick() {
     element.duration > 0
   ) {
     const remaining = (element.duration - element.currentTime) / (element.playbackRate || 1);
-    if (remaining <= autoMixSeconds(deck) + 2) {
-      startMix(engine.currentIndex + 1, "auto");
+    const lead = autoMixSeconds(deck) + 2;
+    if (remaining <= lead) {
+      const target = engine.nextIndex ?? (engine.currentIndex + 1) % engine.playlist.length;
+      // A beat grid that is still being read is worth a short wait: start
+      // a plain crossfade only when the analysis is done (match or not) or
+      // when the track is too close to its end to wait any longer.
+      const pending = trackTempo(deck.index) === undefined || trackTempo(target) === undefined;
+      if (!pending || remaining <= 12) {
+        startMix(target, remaining >= lead - 2 ? "auto" : "quick");
+      }
     }
   }
 }
@@ -1136,6 +1234,7 @@ export function setMuted(muted) {
 }
 
 export function stopDj() {
+  engine.analysisRun += 1;
   if (engine.timer) clearInterval(engine.timer);
   if (engine.raf) cancelAnimationFrame(engine.raf);
   engine.timer = null;

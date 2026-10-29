@@ -122,14 +122,67 @@ export function detectTempo({ envelope, frameRate }) {
   };
 }
 
+// The playback rate that puts a track at toBpm on a grid running at
+// fromBpm, or null when the tempos are too far apart to blend. Half-time
+// and double-time matches count. When lockRate is set (a "no derivatives"
+// license on either side), only a near-exact tempo match syncs and the
+// rate stays 1, because time-stretching would create a derivative.
+export function syncRate(fromBpm, toBpm, lockRate = false) {
+  if (!fromBpm || !toBpm) return null;
+  const range = lockRate ? 0.004 : 0.08;
+  let rate = null;
+  for (const multiple of [1, 2, 0.5]) {
+    const candidate = fromBpm / (toBpm * multiple);
+    if (Math.abs(candidate - 1) < range && (!rate || Math.abs(candidate - 1) < Math.abs(rate - 1))) {
+      rate = candidate;
+    }
+  }
+  if (!rate) return null;
+  return lockRate ? 1 : rate;
+}
+
+// The index of the candidate whose tempo sits closest to fromBpm, or -1
+// when no candidate can be beatmatched. Candidates are { index, bpm,
+// lockRate }; a bpm of 0 means "no beat grid" and never matches. The DJ
+// walks the playlist with this, so the next track is chosen for its tempo
+// and not only for its place in the feed order.
+export function pickNextByTempo(candidates, fromBpm) {
+  let best = -1;
+  let bestOff = Infinity;
+  for (const candidate of candidates) {
+    const rate = syncRate(fromBpm, candidate.bpm, Boolean(candidate.lockRate));
+    if (rate === null) continue;
+    // A locked rate reports 1, so measure its distance from the raw tempos.
+    const off = candidate.lockRate
+      ? Math.abs(fromBpm / candidate.bpm - 1)
+      : Math.abs(rate - 1);
+    if (off < bestOff) {
+      bestOff = off;
+      best = candidate.index;
+    }
+  }
+  return best;
+}
+
 async function decodeHead(url) {
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const decode = async (data) => {
+    const ctx = new Offline(1, 1, ANALYSIS_RATE);
+    const audio = await ctx.decodeAudioData(data);
+    return audio.getChannelData(0);
+  };
   const response = await fetch(url, { headers: { Range: `bytes=0-${ANALYSIS_BYTES - 1}` } });
   if (!response.ok) throw new Error(`analysis fetch ${response.status}`);
   const data = await response.arrayBuffer();
-  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ctx = new Offline(1, 1, ANALYSIS_RATE);
-  const audio = await ctx.decodeAudioData(data);
-  return audio.getChannelData(0);
+  try {
+    return await decode(data);
+  } catch (_error) {
+    // Some formats refuse to decode from a truncated file. Fetch the whole
+    // track once and decode that, so the track still gets a beat grid.
+    const full = await fetch(url);
+    if (!full.ok) throw new Error(`analysis fetch ${full.status}`);
+    return decode(await full.arrayBuffer());
+  }
 }
 
 // Analyses a track once and caches the promise. Never rejects.
