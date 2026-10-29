@@ -13,6 +13,7 @@ import {
   FREE_MIX_OUT_SECONDS,
   loopOutLevel,
   loopOutSteps,
+  performancePoints,
   transitionProfile,
 } from "./chipcafe_mix.mjs";
 import { analyseTrack, pickNextByTempo, syncRate, tempoFor } from "./chipcafe_tempo.mjs";
@@ -727,6 +728,7 @@ function planMix(from, targetIndex, kind) {
     style: freeProfile.style,
     exit: freeProfile.exit,
     punchLevel: freeProfile.punchLevel,
+    performance: freeProfile.performance,
     rate: 1,
     cue: 0,
     beat: 1,
@@ -771,6 +773,7 @@ function planMix(from, targetIndex, kind) {
     style: syncedProfile.style,
     exit: syncedProfile.exit,
     punchLevel: syncedProfile.punchLevel,
+    performance: syncedProfile.performance,
     rate,
     cue,
     inBeat,
@@ -882,7 +885,6 @@ function loopOutSeek(mix, step) {
 
 function scheduleLoopOut(mix, from, level, at, delay) {
   const { stages } = mix;
-  holdParam(from.gain.gain, level);
   for (let beat = stages.swap; beat < stages.out; beat += 1) {
     from.gain.gain.setValueAtTime(level * loopOutLevel(stages, beat), at(beat));
   }
@@ -893,6 +895,17 @@ function scheduleLoopOut(mix, from, level, at, delay) {
   from.gain.gain.linearRampToValueAtTime(0, at(stages.out));
   for (const step of loopOutSteps(stages)) {
     mix.timers.push(setTimeout(() => loopOutSeek(mix, step), delay(step.at)));
+  }
+}
+
+// Hold each fader level inside its bar. Change it in a short move on the
+// next bar line. The caller sets the first point.
+function scheduleLevelSteps(param, points, scale, at) {
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    param.setValueAtTime(previous.level * scale, at(point.at - 0.04));
+    param.linearRampToValueAtTime(point.level * scale, at(point.at + 0.04));
   }
 }
 
@@ -919,18 +932,37 @@ function scheduleMix(mix, from, to) {
     scheduleCutMix(mix, from, to, at);
   } else {
     const punchLevel = mix.punchLevel ?? 0.88;
+    const perform = Boolean(mix.performance);
+    const points = perform ? performancePoints(stages) : null;
+    const level = Math.max(from.gain.gain.value, 0.0001);
+    holdParam(from.gain.gain, level);
 
-    // Incoming: reach punch level on the downbeat, with its bass shelved
-    // off. Its low-pass opens to the bass swap, then it reaches full level.
+    // Incoming: enter on the downbeat, with its bass shelved off. In a
+    // performance, bar steps tease it, ride it, and trade it in front.
+    // Its low-pass opens by phase until the bass swap.
+    const firstLevel = perform ? points.incoming[0].level : punchLevel;
     holdParam(to.gain.gain, 0);
     to.gain.gain.setValueAtTime(0, at(-stages.in));
-    to.gain.gain.linearRampToValueAtTime(punchLevel, at(0));
-    to.gain.gain.setValueAtTime(punchLevel, at(stages.swap));
-    to.gain.gain.linearRampToValueAtTime(1, at(Math.min(stages.out, stages.swap + 0.15)));
+    to.gain.gain.linearRampToValueAtTime(firstLevel, at(0));
+    if (perform) {
+      scheduleLevelSteps(to.gain.gain, points.incoming, 1, at);
+      from.gain.gain.setValueAtTime(level, at(0));
+      scheduleLevelSteps(from.gain.gain, points.outgoing, level, at);
+    } else {
+      to.gain.gain.setValueAtTime(punchLevel, at(stages.swap));
+      to.gain.gain.linearRampToValueAtTime(1, at(Math.min(stages.out, stages.swap + 0.15)));
+    }
     if (to.tone) {
-      holdParam(to.tone.frequency, 1400);
-      to.tone.frequency.setValueAtTime(1400, at(-stages.in));
-      to.tone.frequency.exponentialRampToValueAtTime(7000, at(stages.swap));
+      const toneStart = perform ? 2600 : 1400;
+      holdParam(to.tone.frequency, toneStart);
+      to.tone.frequency.setValueAtTime(toneStart, at(-stages.in));
+      if (perform) {
+        to.tone.frequency.exponentialRampToValueAtTime(4200, at(stages.tease));
+        to.tone.frequency.exponentialRampToValueAtTime(9000, at(stages.ride));
+        to.tone.frequency.exponentialRampToValueAtTime(12000, at(stages.swap));
+      } else {
+        to.tone.frequency.exponentialRampToValueAtTime(7000, at(stages.swap));
+      }
       to.tone.frequency.exponentialRampToValueAtTime(
         TONE_OPEN_HZ,
         at(Math.min(stages.out, stages.swap + 1)),
@@ -952,7 +984,12 @@ function scheduleMix(mix, from, to) {
     from.sweep.frequency.setValueAtTime(20, at(stages.swap));
     if (from.tone) {
       holdParam(from.tone.frequency, TONE_OPEN_HZ);
-      from.tone.frequency.setValueAtTime(TONE_OPEN_HZ, at(stages.swap));
+      from.tone.frequency.setValueAtTime(TONE_OPEN_HZ, at(0));
+      if (perform) {
+        from.tone.frequency.exponentialRampToValueAtTime(9000, at(stages.swap));
+      } else {
+        from.tone.frequency.setValueAtTime(TONE_OPEN_HZ, at(stages.swap));
+      }
     }
     if (mix.exit === "echo") {
       from.sweep.frequency.exponentialRampToValueAtTime(250, at(stages.drop));
@@ -969,19 +1006,17 @@ function scheduleMix(mix, from, to) {
       }
     }
 
-    const level = Math.max(from.gain.gain.value, 0.0001);
+    const exitLevel = level * (perform ? 0.78 : 1);
     if (mix.exit === "loop") {
       scheduleLoopOut(mix, from, level, at, delay);
     } else if (mix.exit === "echo") {
-      holdParam(from.gain.gain, level);
-      from.gain.gain.setValueAtTime(level, at(stages.swap));
-      from.gain.gain.exponentialRampToValueAtTime(Math.max(level * 0.04, 0.0001), at(stages.drop));
+      from.gain.gain.setValueAtTime(exitLevel, at(stages.swap));
+      from.gain.gain.exponentialRampToValueAtTime(Math.max(exitLevel * 0.04, 0.0001), at(stages.drop));
       from.gain.gain.linearRampToValueAtTime(0, at(Math.min(stages.out, stages.drop + 0.5)));
       scheduleEchoOut(mix, from, at);
     } else {
-      holdParam(from.gain.gain, level);
-      from.gain.gain.setValueAtTime(level, at(stages.swap));
-      from.gain.gain.exponentialRampToValueAtTime(Math.max(level * 0.08, 0.0001), at(stages.drop));
+      from.gain.gain.setValueAtTime(exitLevel, at(stages.swap));
+      from.gain.gain.exponentialRampToValueAtTime(Math.max(exitLevel * 0.08, 0.0001), at(stages.drop));
       from.gain.gain.linearRampToValueAtTime(0, at(Math.min(stages.out, stages.drop + 1)));
     }
   }
@@ -1169,7 +1204,10 @@ function mixStatus() {
   let text;
   if (mix.kind === "cut") text = "MIXING · CUT TO THE NEXT TRACK";
   else if (!mix.synced) text = "MIXING · NO BEAT MATCH · SLAM CUT";
-  else if (elapsed < 0) text = `MIXING · NEXT TRACK PUNCHES IN ON THE BEAT · ${locked}`;
+  else if (elapsed < 0) text = `MIXING · NEXT TRACK ENTERS EARLY ON THE BEAT · ${locked}`;
+  else if (mix.performance && elapsed < mix.stages.tease) text = `MIXING · TEASING THE NEXT TRACK · CUTS IN AND OUT · ${locked}`;
+  else if (mix.performance && elapsed < mix.stages.ride) text = `MIXING · RIDING BOTH TRACKS · NEW TRACK UNDER THE OLD · ${locked}`;
+  else if (mix.performance && elapsed < mix.stages.swap - 0.5) text = `MIXING · TRADING BARS · BOTH TRACKS TAKE TURNS · ${locked}`;
   else if (elapsed < mix.stages.swap - 0.5) text = `MIXING · PUNCH IN · NEW BASS HELD BACK · ${locked}`;
   else if (elapsed < mix.stages.swap + 0.5) text = "MIXING · BASS SWAP ON THE BAR";
   else if (mix.exit === "echo") text = "MIXING · ECHO OUT · OLD TRACK TAIL IN TIME";
@@ -1235,11 +1273,21 @@ function tick() {
     if (remaining <= lead) {
       const target = engine.nextIndex ?? (engine.currentIndex + 1) % engine.playlist.length;
       // A beat grid that is still being read is worth a short wait: start
-      // a plain crossfade only when the analysis is done (match or not) or
-      // when the track is too close to its end to wait any longer.
+      // the mix only when the analysis is done (match or not) or when the
+      // track is too close to its end to wait any longer.
       const pending = trackTempo(deck.index) === undefined || trackTempo(target) === undefined;
       if (!pending || remaining <= 12) {
-        startMix(target, remaining >= lead - 2 ? "auto" : "quick");
+        let kind = "quick";
+        if (remaining >= lead - 2) {
+          kind = "auto";
+        } else {
+          const tempo = trackTempo(deck.index);
+          const quickSeconds = tempo
+            ? (36 * tempo.period) / (element.playbackRate || 1)
+            : 0;
+          if (tempo && remaining < quickSeconds) kind = "cut";
+        }
+        startMix(target, kind);
       }
     }
   }
