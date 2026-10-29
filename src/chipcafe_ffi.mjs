@@ -1,6 +1,6 @@
-// 8bit.cafe: one auto-DJ channel fed by the latest chiptune on Audius and Jamendo,
-// streamed through two decks with beatmatched punch-in mixes, plus a pixel-art VJ
-// (see chipcafe_art.mjs) that dances to the live signal.
+// 8bit.cafe: one auto-DJ channel fed by the most-played chiptune on Audius and
+// Jamendo, streamed through two decks with beatmatched punch-in mixes, plus a
+// pixel-art VJ (see chipcafe_art.mjs) that dances to the live signal.
 
 import {
   ACCENT_PAIRS as ACCENTS,
@@ -16,6 +16,11 @@ import {
   performancePoints,
   transitionProfile,
 } from "./chipcafe_mix.mjs";
+import {
+  audiusIsChiptune,
+  jamendoIsChiptune,
+  rankTracks,
+} from "./chipcafe_feed.mjs";
 import {
   analyseTrack,
   hasLongMix,
@@ -168,23 +173,14 @@ function setPalette(track) {
 
 // ------------------------------------------------------------------- feed
 
-// Both sources are filtered to chiptune and ranked the same way: real
-// listens and favourites, decaying with age, so the set leans to recent
-// releases that people actually play.
+// Both sources are filtered to chiptune and ranked the same way, by real
+// listens and favourites (see chipcafe_feed.mjs). The feeds ask for each
+// source's most-played chiptune, never merely its newest uploads: a new
+// track nobody plays is noise, not a set.
 const JAMENDO_CLIENT_ID = "5302eb83";
-const FEED_WINDOW_DAYS = 365;
-const CHIP_PATTERN =
-  /chip ?tune|chip ?music|\b8[- ]?bit\b|\b16[- ]?bit\b|lsdj|famitracker|famistudio|furnace|deflemask|2a03|game ?boy|\bnes\b|\bc64\b|\bsid\b|vrc6|ym2612|pico-?8|bitpop/i;
-const NOT_MUSIC_GENRES = new Set(["Podcasts", "Comedy", "Spoken Word", "Audiobooks", "Kids", "Devotional"]);
-const NOT_A_TRACK = /type beat|podcast|episode|\bdj set\b|live set|radio show/i;
 
 function isoDate(track) {
   return String(track.release_date || track.created_at || "").slice(0, 10);
-}
-
-function ageInDays(date) {
-  const time = Date.parse(date);
-  return Number.isFinite(time) ? (Date.now() - time) / 86400000 : Infinity;
 }
 
 // Creative Commons label, URL and "no derivatives" flag from a license
@@ -243,12 +239,6 @@ function audiusTrack(track) {
   };
 }
 
-function audiusIsChiptune(track) {
-  if (track.ai_attribution_user_id || NOT_MUSIC_GENRES.has(track.genre)) return false;
-  if (NOT_A_TRACK.test(track.title || "")) return false;
-  return track.genre === "Chiptune" || CHIP_PATTERN.test(`${track.title || ""} ${track.tags || ""}`);
-}
-
 function jamendoTrack(track) {
   const license = licenseInfo(track.license_ccurl);
   const stats = track.stats || {};
@@ -269,22 +259,6 @@ function jamendoTrack(track) {
     plays: stats.rate_listened_total || 0,
     favs: stats.favorited || 0,
   };
-}
-
-// Jamendo tags are self-applied, so chiptune or 8-bit must be one of the
-// track's genres, and hip-hop beats with an 8-bit tag are left out.
-function jamendoIsChiptune(track) {
-  const genres = ((track.musicinfo && track.musicinfo.tags && track.musicinfo.tags.genres) || [])
-    .map((genre) => String(genre).toLowerCase());
-  if (!genres.some((genre) => genre === "chiptune" || genre === "8bit" || genre === "chipmusic")) return false;
-  if (genres.some((genre) => genre === "hiphop" || genre === "rap" || genre === "trap")) return false;
-  return !NOT_A_TRACK.test(track.name || "");
-}
-
-function trackScore(track) {
-  const age = ageInDays(track.released);
-  if (age > FEED_WINDOW_DAYS) return -1;
-  return (Math.log1p(track.plays) + 2 * Math.log1p(track.favs)) * Math.pow(0.5, Math.max(0, age) / 120);
 }
 
 async function preflightTrack(track) {
@@ -311,33 +285,9 @@ async function preflightTrack(track) {
 }
 
 async function buildPlaylist(tracks) {
-  const seen = new Set();
-  const ranked = [];
-  for (const track of tracks) {
-    if (!track.audio_url || seen.has(track.id)) continue;
-    if (track.seconds < 60 || track.seconds > 600) continue;
-    const score = trackScore(track);
-    if (score < 0) continue;
-    seen.add(track.id);
-    ranked.push({ ...track, score });
-  }
-  ranked.sort((a, b) => b.score - a.score);
+  const ranked = rankTracks(tracks);
 
-  // One track per artist first, so the mix moves between artists.
-  const primary = [];
-  const extra = [];
-  const artists = new Set();
-  for (const track of ranked) {
-    const key = track.artist.toLowerCase();
-    if (artists.has(key)) {
-      extra.push(track);
-    } else {
-      artists.add(key);
-      primary.push(track);
-    }
-  }
-
-  const candidates = primary.concat(extra).slice(0, 30);
+  const candidates = ranked.slice(0, 30);
   const checks = await Promise.all(candidates.map(preflightTrack));
   let selected = candidates.filter((_track, index) => checks[index]).slice(0, 18);
   if (selected.length < 3) selected = ranked.slice(0, 18);
@@ -369,23 +319,27 @@ async function audiusFeed() {
 }
 
 async function jamendoFeed() {
-  const today = new Date();
-  const from = new Date(today.getTime() - FEED_WINDOW_DAYS * 86400000);
-  const day = (date) => date.toISOString().slice(0, 10);
-  const searches = ["chiptune", "8bit"].map(
-    (tag) =>
-      "https://api.jamendo.com/v3.0/tracks/?" +
-      new URLSearchParams({
-        client_id: JAMENDO_CLIENT_ID,
-        format: "json",
-        limit: "200",
-        tags: tag,
-        order: "releasedate_desc",
-        include: "musicinfo stats licenses",
-        audioformat: "mp32",
-        datebetween: `${day(from)}_${day(today)}`,
-      }),
-  );
+  // Most-played first, this month and all time. Newest-first ordering
+  // filled the pool with unheard uploads from the last few days, and a
+  // single Jamendo query sometimes answers empty, so ask four ways and
+  // let the ranking dedupe.
+  const searches = [];
+  for (const tag of ["chiptune", "8bit"]) {
+    for (const order of ["popularity_month", "listens_total"]) {
+      searches.push(
+        "https://api.jamendo.com/v3.0/tracks/?" +
+          new URLSearchParams({
+            client_id: JAMENDO_CLIENT_ID,
+            format: "json",
+            limit: "100",
+            tags: tag,
+            order,
+            include: "musicinfo stats licenses",
+            audioformat: "mp32",
+          }),
+      );
+    }
+  }
   const results = await Promise.all(searches.map((url) => fetchJson(url).catch(() => ({ results: [] }))));
   return results
     .flatMap((result) => (Array.isArray(result.results) ? result.results : []))
