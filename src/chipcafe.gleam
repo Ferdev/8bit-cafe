@@ -33,6 +33,7 @@ pub type NowPlaying {
     seconds: Int,
     accent: String,
     accent_alt: String,
+    source: String,
   )
 }
 
@@ -58,6 +59,10 @@ pub type Model {
     playing: Bool,
     position: Int,
     duration: Int,
+    mix_fader: Int,
+    mix_text: String,
+    bpm: String,
+    scrub: Option(Int),
   )
 }
 
@@ -72,8 +77,9 @@ fn placeholder() -> NowPlaying {
     license: "",
     license_url: "",
     seconds: 0,
-    accent: "#3ae8ff",
-    accent_alt: "#ff3ad4",
+    accent: "#73eff7",
+    accent_alt: "#ef7d57",
+    source: "",
   )
 }
 
@@ -104,6 +110,19 @@ pub fn progress_percent(position: Int, duration: Int) -> Int {
         _ -> percent
       }
     }
+  }
+}
+
+/// Turns the progress slider value into a seek target inside the track.
+pub fn seek_seconds(value: String, duration: Int) -> Int {
+  let seconds = case int.parse(value) {
+    Ok(seconds) -> seconds
+    Error(_) -> 0
+  }
+  case seconds {
+    _ if seconds < 0 -> 0
+    _ if seconds > duration -> duration
+    _ -> seconds
   }
 }
 
@@ -146,10 +165,16 @@ fn start_dj(
     Int,
     String,
     String,
+    String,
   ) -> Nil,
   on_progress: fn(Int, Int) -> Nil,
   on_state: fn(String, Bool) -> Nil,
+  on_mix: fn(Int, String, String) -> Nil,
 ) -> Nil
+
+@external(erlang, "chipcafe_ffi", "seek_to")
+@external(javascript, "./chipcafe_ffi.mjs", "seekTo")
+fn seek_to(seconds: Int) -> Nil
 
 @external(erlang, "chipcafe_ffi", "toggle_playback")
 @external(javascript, "./chipcafe_ffi.mjs", "togglePlayback")
@@ -173,6 +198,9 @@ pub type Msg {
   TrackChanged(NowPlaying, UpNext)
   ProgressChanged(Int, Int)
   StateChanged(String, Bool)
+  MixChanged(Int, String, String)
+  Scrub(String)
+  Seek(String)
   ToggleMute
   TogglePlayback
   NextTrack
@@ -190,6 +218,10 @@ fn init(_) -> #(Model, Effect(Msg)) {
       playing: False,
       position: 0,
       duration: 0,
+      mix_fader: 0,
+      mix_text: "",
+      bpm: "",
+      scrub: None,
     )
   let effect =
     effect.from(fn(dispatch) {
@@ -208,6 +240,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
           seconds,
           accent,
           accent_alt,
+          source,
         ) {
           dispatch(TrackChanged(
             NowPlaying(
@@ -222,12 +255,14 @@ fn init(_) -> #(Model, Effect(Msg)) {
               seconds:,
               accent:,
               accent_alt:,
+              source:,
             ),
             UpNext(title: next_title, artist: next_artist),
           ))
         },
         fn(position, duration) { dispatch(ProgressChanged(position, duration)) },
         fn(status, playing) { dispatch(StateChanged(status, playing)) },
+        fn(fader, text, bpm) { dispatch(MixChanged(fader, text, bpm)) },
       )
     })
   #(model, effect)
@@ -243,6 +278,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         mixes: model.mixes + 1,
         position: 0,
         duration: now.seconds,
+        scrub: None,
       ),
       effect.none(),
     )
@@ -270,6 +306,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       effect.none(),
     )
     StateChanged(_, playing) -> #(Model(..model, playing:), effect.none())
+    MixChanged(mix_fader, mix_text, bpm) -> #(
+      Model(..model, mix_fader:, mix_text:, bpm:),
+      effect.none(),
+    )
+    Scrub(value) -> #(
+      Model(..model, scrub: Some(seek_seconds(value, model.duration))),
+      effect.none(),
+    )
+    Seek(value) -> {
+      let seconds = seek_seconds(value, model.duration)
+      #(
+        Model(..model, position: seconds, scrub: None),
+        effect.from(fn(_) { seek_to(seconds) }),
+      )
+    }
     ToggleMute -> {
       let muted = !model.muted
       let effect = effect.from(fn(_) { set_muted(muted) })
@@ -298,14 +349,13 @@ fn view(model: Model) -> Element(Msg) {
       attribute.style("--accent-alt", model.now.accent_alt),
     ],
     [
-      html.canvas([
-        attribute.id("vj-art"),
-        attribute.class("vj-art"),
-        attribute.width(320),
-        attribute.height(180),
-        attribute.aria("hidden", "true"),
+      html.div([attribute.class("vj-frame")], [
+        html.canvas([
+          attribute.id("vj-art"),
+          attribute.class("vj-art"),
+          attribute.aria("hidden", "true"),
+        ]),
       ]),
-      html.div([attribute.class("vj-shade")], []),
       view_topbar(model.status),
       view_deck(model),
       view_console(model),
@@ -353,6 +403,7 @@ fn view_deck(model: Model) -> Element(Msg) {
       ]),
       view_meta(model.now),
       view_transport(model),
+      view_mixer(model),
       view_progress(model),
       view_caption(model),
     ]),
@@ -405,9 +456,9 @@ fn view_meta(now: NowPlaying) -> Element(Msg) {
             attribute.target("_blank"),
             attribute.rel("noopener noreferrer"),
             attribute.class("meta-link"),
-            attribute.title("Listen on Audius"),
+            attribute.title("Listen on " <> now.source),
           ],
-          [element.text("AUDIUS ↗")],
+          [element.text(string.uppercase(now.source) <> " ↗")],
         )
     },
   ])
@@ -453,28 +504,71 @@ fn view_transport(model: Model) -> Element(Msg) {
   ])
 }
 
-fn view_progress(model: Model) -> Element(Msg) {
-  let percent = progress_percent(model.position, model.duration)
-  html.div([attribute.class("mix-progress"), attribute.aria("hidden", "true")], [
-    html.div(
+fn view_mixer(model: Model) -> Element(Msg) {
+  let deck = fn(name, on) {
+    html.span(
       [
-        attribute.class("mix-fill"),
-        attribute.style("width", int.to_string(percent) <> "%"),
+        attribute.class("mixer-deck"),
+        attribute.classes([#("is-on", on)]),
       ],
-      [],
-    ),
+      [element.text(name)],
+    )
+  }
+  html.div([attribute.class("mixer")], [
+    html.div([attribute.class("mixer-row")], [
+      deck("A", model.mix_fader < 100),
+      html.div([attribute.class("xfader")], [
+        html.span(
+          [
+            attribute.class("xfader-knob"),
+            attribute.style("left", int.to_string(model.mix_fader) <> "%"),
+          ],
+          [],
+        ),
+      ]),
+      deck("B", model.mix_fader > 0),
+    ]),
+    html.p([attribute.class("mixer-status")], [
+      element.text(model.mix_text),
+    ]),
+  ])
+}
+
+fn view_progress(model: Model) -> Element(Msg) {
+  let position = case model.scrub {
+    Some(seconds) -> seconds
+    None -> model.position
+  }
+  let percent = progress_percent(position, model.duration)
+  html.input([
+    attribute.type_("range"),
+    attribute.class("mix-progress"),
+    attribute.min("0"),
+    attribute.max(int.to_string(model.duration)),
+    attribute.step("1"),
+    attribute.value(int.to_string(position)),
+    attribute.style("--progress", int.to_string(percent) <> "%"),
+    attribute.aria("label", "Track position"),
+    attribute.aria("valuetext", format_time(position)),
+    attribute.disabled(model.duration <= 0),
+    event.on_input(Scrub),
+    event.on_change(Seek),
   ])
 }
 
 fn view_caption(model: Model) -> Element(Msg) {
+  let position = case model.scrub {
+    Some(seconds) -> seconds
+    None -> model.position
+  }
   html.div([attribute.class("mix-caption")], [
     html.span([], [element.text("MIX #" <> mix_number(model.mixes))]),
     html.span([attribute.class("mix-time")], [
       element.text(
-        format_time(model.position) <> " / " <> format_time(model.duration),
+        format_time(position) <> " / " <> format_time(model.duration),
       ),
     ]),
-    html.span([], [element.text("LIVE BLEND")]),
+    html.span([], [element.text(model.bpm)]),
   ])
 }
 
@@ -493,7 +587,7 @@ fn view_next_card(model: Model) -> Element(Msg) {
         ])
     },
     html.p([attribute.class("next-note")], [
-      element.text("THE DJ IS ALREADY BEATMATCHING IT"),
+      element.text("CUED ON THE OTHER DECK"),
     ]),
   ])
 }
