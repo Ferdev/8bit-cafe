@@ -59,7 +59,7 @@ pub type Model {
     playing: Bool,
     position: Int,
     duration: Int,
-    mix_fader: Int,
+    mix_progress: Int,
     mix_text: String,
     bpm: String,
     scrub: Option(Int),
@@ -218,7 +218,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       playing: False,
       position: 0,
       duration: 0,
-      mix_fader: 0,
+      mix_progress: 0,
       mix_text: "",
       bpm: "",
       scrub: None,
@@ -262,7 +262,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
         },
         fn(position, duration) { dispatch(ProgressChanged(position, duration)) },
         fn(status, playing) { dispatch(StateChanged(status, playing)) },
-        fn(fader, text, bpm) { dispatch(MixChanged(fader, text, bpm)) },
+        fn(progress, text, bpm) { dispatch(MixChanged(progress, text, bpm)) },
       )
     })
   #(model, effect)
@@ -306,8 +306,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       effect.none(),
     )
     StateChanged(_, playing) -> #(Model(..model, playing:), effect.none())
-    MixChanged(mix_fader, mix_text, bpm) -> #(
-      Model(..model, mix_fader:, mix_text:, bpm:),
+    MixChanged(mix_progress, mix_text, bpm) -> #(
+      Model(..model, mix_progress:, mix_text:, bpm:),
       effect.none(),
     )
     Scrub(value) -> #(
@@ -388,7 +388,7 @@ fn view_topbar(status: StreamStatus) -> Element(Msg) {
 fn view_deck(model: Model) -> Element(Msg) {
   html.main([attribute.class("deck")], [
     html.section([attribute.class("now-card")], [
-      html.p([attribute.class("eyebrow")], [element.text("NOW MIXING")]),
+      html.p([attribute.class("eyebrow")], [element.text("NOW PLAYING")]),
       html.h1([attribute.class("track-title")], [element.text(model.now.title)]),
       html.p([attribute.class("track-artist")], [
         view_artist(model.now),
@@ -403,7 +403,7 @@ fn view_deck(model: Model) -> Element(Msg) {
       ]),
       view_meta(model.now),
       view_transport(model),
-      view_mixer(model),
+      view_mix_status(model),
       view_progress(model),
       view_caption(model),
     ]),
@@ -504,31 +504,39 @@ fn view_transport(model: Model) -> Element(Msg) {
   ])
 }
 
-fn view_mixer(model: Model) -> Element(Msg) {
-  let deck = fn(name, on) {
-    html.span(
-      [
-        attribute.class("mixer-deck"),
-        attribute.classes([#("is-on", on)]),
-      ],
-      [element.text(name)],
-    )
-  }
+/// The auto-DJ status strip. It is a readout, not a control: the label
+/// says so, the bar shows how far the current mix has run, and the text
+/// says what the DJ does now and next.
+fn view_mix_status(model: Model) -> Element(Msg) {
   html.div([attribute.class("mixer")], [
-    html.div([attribute.class("mixer-row")], [
-      deck("A", model.mix_fader < 100),
-      html.div([attribute.class("xfader")], [
+    html.div([attribute.class("mixer-head")], [
+      html.span([attribute.class("mixer-label")], [
+        element.text("AUTO-DJ STATUS"),
+      ]),
+      html.span([attribute.class("mixer-note")], [
+        element.text("AUTOMATIC · NO ACTION NEEDED"),
+      ]),
+    ]),
+    html.div(
+      [
+        attribute.class("mixer-track"),
+        attribute.attribute("role", "progressbar"),
+        attribute.aria("label", "Mix progress"),
+        attribute.aria("valuemin", "0"),
+        attribute.aria("valuemax", "100"),
+        attribute.aria("valuenow", int.to_string(model.mix_progress)),
+      ],
+      [
         html.span(
           [
-            attribute.class("xfader-knob"),
-            attribute.style("left", int.to_string(model.mix_fader) <> "%"),
+            attribute.class("mixer-fill"),
+            attribute.style("width", int.to_string(model.mix_progress) <> "%"),
           ],
           [],
         ),
-      ]),
-      deck("B", model.mix_fader > 0),
-    ]),
-    html.p([attribute.class("mixer-status")], [
+      ],
+    ),
+    html.p([attribute.class("mixer-status"), attribute.aria("live", "polite")], [
       element.text(model.mix_text),
     ]),
   ])
@@ -587,7 +595,7 @@ fn view_next_card(model: Model) -> Element(Msg) {
         ])
     },
     html.p([attribute.class("next-note")], [
-      element.text("CUED ON THE OTHER DECK"),
+      element.text("THE AUTO-DJ MIXES THIS TRACK IN"),
     ]),
   ])
 }
