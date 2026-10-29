@@ -14,7 +14,7 @@ import {
 
 const exits = [];
 for (let sequence = 0; sequence < 3; sequence += 1) {
-  const profile = transitionProfile({ synced: true, kind: "auto", sequence });
+  const profile = transitionProfile({ synced: true, kind: "auto", sequence, longMix: true });
   exits.push(profile.exit);
   assert.equal(profile.performance, true, "a synced auto mix is a performance");
   assert.ok(profile.stages.in <= 0.25, "the next track punches in within a quarter beat");
@@ -49,7 +49,11 @@ const locked = transitionProfile({
 });
 assert.equal(locked.exit, "punch", "locked tracks do not use loop or echo moves");
 
-const quick = transitionProfile({ synced: true, kind: "quick", sequence: 1 });
+const unmatched = transitionProfile({ synced: true, kind: "auto", sequence: 0 });
+assert.equal(unmatched.performance, false, "a synced pair with no key fit gets no long overlap");
+assert.ok(unmatched.stages.out <= 16, "an unmatched synced mix stays short");
+
+const quick = transitionProfile({ synced: true, kind: "quick", sequence: 1, longMix: true });
 assert.equal(quick.performance, true, "the next-track button also starts a performance");
 assert.ok(quick.stages.swap >= 24, "a manual mix gives the next track six bars before the swap");
 assert.ok(quick.stages.out >= 32, "a manual performance lasts at least eight bars");
@@ -60,7 +64,7 @@ assert.ok(free.stages.in <= 0.2, "the next track enters at once in a slam");
 assert.ok(free.stages.drop <= 1.5, "the old track drops fast in a slam");
 assert.ok(free.stages.out <= 3, "a slam ends within three seconds");
 
-const loop = transitionProfile({ synced: true, kind: "auto", sequence: 2 });
+const loop = transitionProfile({ synced: true, kind: "auto", sequence: 2, longMix: true });
 const steps = loopOutSteps(loop.stages);
 assert.ok(steps.length >= 5, "loop out repeats the old beat more than once");
 assert.ok(steps.every((step) => step.at >= loop.stages.swap && step.at < loop.stages.out));

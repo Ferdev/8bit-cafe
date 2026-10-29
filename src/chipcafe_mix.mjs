@@ -1,8 +1,9 @@
-// Transition shapes for the auto-DJ. A synced mix is a long performance,
-// not a short blend at the end of a track. The next track enters many bars
-// before the bass swap. The DJ teases it in and out, rides both tracks,
-// trades bars between them, swaps the bass, and then drops the old track
-// with a filter, an echo tail, or a beat loop.
+// Transition shapes for the auto-DJ. A matched pair gets a long
+// performance, not a short blend at the end of a track. The next track
+// enters many bars before the bass swap. The DJ teases it in and out,
+// rides both tracks, trades bars between them, swaps the bass, and then
+// drops the old track with a filter, an echo tail, or a beat loop. A pair
+// with no key fit gets a short mix only. Long overlaps in a bad key clash.
 
 export const AUTO_MIX_OUT_BEATS = 56;
 export const FREE_MIX_OUT_SECONDS = 3;
@@ -18,7 +19,7 @@ function profile(style, exit, punchLevel, stages, performance = false) {
 // - swap: the bass moves to the next track
 // - drop: the old track loses its main level
 // - out: the mix is complete
-export function transitionProfile({ synced, kind, sequence = 0, lockRate = false }) {
+export function transitionProfile({ synced, kind, sequence = 0, lockRate = false, longMix = false }) {
   if (kind === "cut") {
     return profile("cut", "cut", 1, { in: 0.35, swap: 0.2, drop: 0.35, out: 0.45 });
   }
@@ -31,6 +32,13 @@ export function transitionProfile({ synced, kind, sequence = 0, lockRate = false
 
   const exits = lockRate ? ["punch"] : ["punch", "echo", "loop"];
   const exit = exits[Math.abs(Math.floor(sequence)) % exits.length];
+  if (!longMix) {
+    // Beat sync alone is not a match. Without a key fit, keep the overlap
+    // to two bars so clashing notes do not sit together.
+    return kind === "quick"
+      ? profile("beatmatch", exit, 0.88, { in: 0.25, swap: 4, drop: 5, out: 8 })
+      : profile("beatmatch", exit, 0.88, { in: 0.25, swap: 8, drop: 9, out: 16 });
+  }
   if (kind === "quick") {
     // The next-track button uses a short form of the same performance:
     // two bars of tease, two bars of ride, two bars of trade, then out.
